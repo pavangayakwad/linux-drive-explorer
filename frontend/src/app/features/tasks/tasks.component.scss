@@ -1,0 +1,62 @@
+.tasks-page {
+  padding: 1rem 1.5rem;
+  max-width: 60rem;
+  margin: 0 auto;
+
+  &__header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+
+    h1 {
+      font-size: 1.1rem;
+      margin: 0;
+    }
+  }
+
+  &__op {
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+
+  &__summary {
+    font-size: 0.75rem;
+    color: var(--p-text-muted-color, #6b7280);
+  }
+
+  &__error {
+    font-size: 0.75rem;
+    color: var(--p-red-600, #dc2626);
+    margin-top: 0.15rem;
+  }
+
+  &__progress-detail {
+    font-size: 0.7rem;
+    color: var(--p-text-muted-color, #6b7280);
+    margin-top: 0.2rem;
+  }
+
+  &__empty {
+    text-align: center;
+    color: var(--p-text-muted-color, #9ca3af);
+    padding: 2rem;
+  }
+}
+
+:host ::ng-deep {
+  .p-datatable-table > .p-datatable-thead > tr > th {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--p-text-muted-color, #6b7280);
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+  }
+
+  .p-datatable-table > .p-datatable-tbody > tr > td {
+    font-size: 0.8125rem;
+    padding-top: 0.28rem;
+    padding-bottom: 0.28rem;
+  }
+}

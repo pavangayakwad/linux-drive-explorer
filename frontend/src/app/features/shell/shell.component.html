@@ -1,0 +1,15 @@
+<div class="shell" [style.grid-template-columns]="sidebarWidth() + 'px 5px 1fr'">
+  <app-sidebar
+    class="shell__sidebar"
+    [drives]="drives()"
+    [currentPath]="currentPath()"
+    [refreshingDrives]="refreshingDrives()"
+    [runningTaskCount]="runningTaskCount()"
+    (navigate)="onNavigate($event)"
+    (refreshDrives)="refreshDrives()"
+  />
+  <div class="shell__resizer" (mousedown)="startResize($event)"></div>
+  <div class="shell__main">
+    <router-outlet />
+  </div>
+</div>

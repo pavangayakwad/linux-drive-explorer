@@ -1,0 +1,57 @@
+.trash-page {
+  padding: 1rem 1.5rem;
+  max-width: 60rem;
+  margin: 0 auto;
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+
+    h1 {
+      font-size: 1.1rem;
+      margin: 0;
+    }
+  }
+
+  &__spacer {
+    flex: 1;
+  }
+
+  &__muted {
+    color: var(--p-text-muted-color, #6b7280);
+    font-size: 0.8rem;
+  }
+
+  &__empty {
+    text-align: center;
+    color: var(--p-text-muted-color, #9ca3af);
+    padding: 2rem;
+  }
+}
+
+:host ::ng-deep {
+  .file-icon {
+    margin-right: 0.4rem;
+    color: var(--p-text-muted-color, #6b7280);
+
+    &--folder {
+      color: #eab308;
+    }
+  }
+
+  .p-datatable-table > .p-datatable-thead > tr > th {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--p-text-muted-color, #6b7280);
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+  }
+
+  .p-datatable-table > .p-datatable-tbody > tr > td {
+    font-size: 0.8125rem;
+    padding-top: 0.28rem;
+    padding-bottom: 0.28rem;
+  }
+}

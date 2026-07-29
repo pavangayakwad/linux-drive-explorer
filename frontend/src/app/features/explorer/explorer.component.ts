@@ -1,0 +1,889 @@
+import { CommonModule } from '@angular/common';
+import {
+  ChangeDetectorRef,
+  Component,
+  ElementRef,
+  OnDestroy,
+  OnInit,
+  ViewChild,
+  afterRenderEffect,
+  computed,
+  signal,
+} from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
+import { Subscription } from 'rxjs';
+import { ButtonModule } from 'primeng/button';
+import { ConfirmationService, MenuItem, MessageService } from 'primeng/api';
+import { ContextMenuModule } from 'primeng/contextmenu';
+import { ContextMenu } from 'primeng/contextmenu';
+import { DialogModule } from 'primeng/dialog';
+import { InputTextModule } from 'primeng/inputtext';
+import { TableModule } from 'primeng/table';
+import { TooltipModule } from 'primeng/tooltip';
+import { FilesService } from '../../core/services/files.service';
+import { OperationsService } from '../../core/services/operations.service';
+import { SearchService } from '../../core/services/search.service';
+import { TrashService } from '../../core/services/trash.service';
+import { DirectoryListing, FileEntry } from '../../core/models/file-system.model';
+import {
+  dateGroupLabel,
+  dateGroupOrder,
+  fileIconClass,
+  formatBytes,
+  formatDateTime,
+  pathSegments,
+} from '../../shared/format.util';
+import { PropertiesDialogComponent } from './components/properties-dialog/properties-dialog.component';
+import { PreviewDialogComponent } from './components/preview-dialog/preview-dialog.component';
+import { DirectorySizeTracker, FolderSizeState } from '../../shared/directory-size-tracker';
+
+interface FileEntryRow extends FileEntry {
+  dateGroupOrder: number;
+}
+
+interface ClipboardState {
+  mode: 'copy' | 'cut';
+  paths: string[];
+}
+
+interface PromptState {
+  title: string;
+  label: string;
+  onConfirm: (value: string) => void | Promise<void>;
+}
+
+interface DataColumnWidths {
+  size: number;
+  type: number;
+  createdAt: number;
+  modifiedAt: number;
+}
+
+@Component({
+  selector: 'app-explorer',
+  standalone: true,
+  imports: [
+    CommonModule,
+    FormsModule,
+    TableModule,
+    ButtonModule,
+    TooltipModule,
+    ContextMenuModule,
+    DialogModule,
+    InputTextModule,
+    PropertiesDialogComponent,
+    PreviewDialogComponent,
+  ],
+  templateUrl: './explorer.component.html',
+  styleUrl: './explorer.component.scss',
+})
+export class ExplorerComponent implements OnInit, OnDestroy {
+  @ViewChild('rowMenu') rowMenu!: ContextMenu;
+  @ViewChild('searchInput') searchInputRef?: ElementRef<HTMLInputElement>;
+
+  readonly listing = signal<DirectoryListing | null>(null);
+  readonly loading = signal(false);
+  readonly errorMessage = signal<string | null>(null);
+  readonly selection = signal<FileEntry[]>([]);
+  readonly focusedPath = signal<string | null>(null);
+  readonly clipboard = signal<ClipboardState | null>(null);
+  readonly promptDialog = signal<PromptState | null>(null);
+  readonly propertiesVisible = signal(false);
+  readonly propertiesEntries = signal<FileEntry[]>([]);
+  readonly previewVisible = signal(false);
+  readonly previewEntry = signal<FileEntry | null>(null);
+  readonly contextMenuItems = signal<MenuItem[]>([]);
+  readonly sortField = signal('modifiedAt');
+  readonly sortOrder = signal(-1);
+  readonly showSearchBox = signal(false);
+  readonly searchMode = signal(false);
+  readonly searching = signal(false);
+  readonly searchResults = signal<FileEntry[]>([]);
+  readonly selectionBox = signal<{ left: number; top: number; width: number; height: number } | null>(null);
+  readonly showFolderSizes = signal(false);
+  readonly folderSizes = signal<ReadonlyMap<string, FolderSizeState>>(new Map());
+  // Measured from the actual rendered cells (see measureColumnWidths) so each data column is exactly as
+  // wide as its content needs and no wider - any space left over goes to the Name column.
+  readonly columnWidths = signal<DataColumnWidths>({ size: 64, type: 112, createdAt: 168, modifiedAt: 168 });
+  promptValue = '';
+  searchQuery = '';
+
+  private anchorPath: string | null = null;
+  private dragPaths: string[] | null = null;
+  private queryParamSub?: Subscription;
+  private rubberBand: { startX: number; startY: number; active: boolean; anchorSelection: FileEntry[] } | null = null;
+  private sizeTracker: DirectorySizeTracker;
+  private searchDebounceHandle: ReturnType<typeof setTimeout> | null = null;
+  private static readonly RUBBER_BAND_THRESHOLD = 4;
+  private static readonly SEARCH_DEBOUNCE_MS = 250;
+
+  readonly rows = computed<FileEntryRow[]>(() =>
+    (this.listing()?.entries ?? []).map((entry) => ({
+      ...entry,
+      dateGroupOrder: dateGroupOrder(entry.modifiedAt),
+    })),
+  );
+
+  readonly sortedRows = computed<FileEntryRow[]>(() => {
+    const rows = [...this.rows()];
+    const field = this.sortField() as keyof FileEntryRow;
+    const order = this.sortOrder();
+    rows.sort((a, b) => {
+      if (a.dateGroupOrder !== b.dateGroupOrder) {
+        return a.dateGroupOrder - b.dateGroupOrder;
+      }
+      const av = a[field];
+      const bv = b[field];
+      let cmp = 0;
+      if (av == null && bv != null) cmp = -1;
+      else if (av != null && bv == null) cmp = 1;
+      else if (av == null && bv == null) cmp = 0;
+      else if (typeof av === 'string' && typeof bv === 'string') cmp = av.localeCompare(bv);
+      else cmp = av! < bv! ? -1 : av! > bv! ? 1 : 0;
+      return order * cmp;
+    });
+    return rows;
+  });
+
+  readonly displayRows = computed<FileEntryRow[]>(() => {
+    if (this.searchMode()) {
+      return this.searchResults().map((entry) => ({ ...entry, dateGroupOrder: 0 }));
+    }
+    return this.sortedRows();
+  });
+
+  readonly formatBytes = formatBytes;
+  readonly formatDateTime = formatDateTime;
+  readonly fileIconClass = fileIconClass;
+  readonly dateGroupLabel = dateGroupLabel;
+
+  constructor(
+    private readonly filesService: FilesService,
+    private readonly operationsService: OperationsService,
+    private readonly searchService: SearchService,
+    private readonly trashService: TrashService,
+    private readonly confirmationService: ConfirmationService,
+    private readonly messageService: MessageService,
+    private readonly route: ActivatedRoute,
+    private readonly router: Router,
+    private readonly elementRef: ElementRef<HTMLElement>,
+    private readonly changeDetectorRef: ChangeDetectorRef,
+  ) {
+    this.sizeTracker = this.createSizeTracker();
+
+    afterRenderEffect(() => {
+      this.displayRows();
+      this.measureColumnWidths();
+    });
+  }
+
+  ngOnInit(): void {
+    this.queryParamSub = this.route.queryParamMap.subscribe((params) => {
+      this.exitSearch();
+      void this.performLoad(params.get('path') ?? '/');
+    });
+    this.elementRef.nativeElement.addEventListener('keydown', this.onKeyDown, true);
+  }
+
+  ngOnDestroy(): void {
+    this.queryParamSub?.unsubscribe();
+    this.elementRef.nativeElement.removeEventListener('keydown', this.onKeyDown, true);
+    window.removeEventListener('mousemove', this.onRubberBandMove);
+    window.removeEventListener('mouseup', this.onRubberBandUp);
+    this.sizeTracker.dispose();
+    if (this.searchDebounceHandle !== null) {
+      clearTimeout(this.searchDebounceHandle);
+    }
+  }
+
+  get breadcrumb() {
+    return pathSegments(this.listing()?.path ?? '/');
+  }
+
+  navigateTo(path: string): void {
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { path } });
+  }
+
+  private async performLoad(path: string): Promise<void> {
+    this.loading.set(true);
+    this.errorMessage.set(null);
+    this.resetSizeTracker();
+    try {
+      const listing = await this.filesService.list(path);
+      this.listing.set(listing);
+      this.selection.set([]);
+      this.focusedPath.set(null);
+      if (this.showFolderSizes()) {
+        this.trackVisibleFolderSizes();
+      }
+    } catch {
+      this.errorMessage.set(`Could not open "${path}".`);
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  goUp(): void {
+    const parent = this.listing()?.parentPath;
+    if (parent) {
+      this.navigateTo(parent);
+    }
+  }
+
+  refresh(): void {
+    void this.performLoad(this.listing()?.path ?? '/');
+  }
+
+  onRowActivate(entry: FileEntry): void {
+    if (entry.isDirectory) {
+      this.navigateTo(entry.path);
+    } else {
+      this.openPreview(entry);
+    }
+  }
+
+  // ---- Folder sizes ----
+
+  toggleFolderSizes(): void {
+    this.showFolderSizes.update((v) => !v);
+    if (this.showFolderSizes()) {
+      this.trackVisibleFolderSizes();
+    } else {
+      this.resetSizeTracker();
+    }
+  }
+
+  folderSizeFor(path: string): FolderSizeState | undefined {
+    return this.folderSizes().get(path);
+  }
+
+  private trackVisibleFolderSizes(): void {
+    for (const row of this.displayRows()) {
+      if (row.isDirectory) {
+        this.sizeTracker.track(row.path);
+      }
+    }
+  }
+
+  private createSizeTracker(): DirectorySizeTracker {
+    return new DirectorySizeTracker(this.filesService, (state) => this.folderSizes.set(new Map(state)));
+  }
+
+  private resetSizeTracker(): void {
+    this.sizeTracker.dispose();
+    this.sizeTracker = this.createSizeTracker();
+    this.folderSizes.set(new Map());
+  }
+
+  // ---- Column sizing ----
+  //
+  // table-layout: fixed keeps a long file name from squeezing the data columns, but that means *we*
+  // have to size those columns instead of the browser. Cloning the live table with table-layout: auto
+  // and reading the resulting header widths gets an exact answer - including things a manual estimate
+  // would get wrong, like tabular-nums digit width on the Size column - without duplicating the
+  // formatting/rendering logic. The clone is measured off-screen and discarded immediately.
+  private measureColumnWidths(): void {
+    const table = this.elementRef.nativeElement.querySelector('.p-datatable-table');
+    if (!table) {
+      return;
+    }
+
+    const clone = table.cloneNode(true) as HTMLTableElement;
+    clone.style.position = 'absolute';
+    clone.style.visibility = 'hidden';
+    clone.style.left = '-99999px';
+    clone.style.top = '0';
+    clone.style.tableLayout = 'auto';
+    clone.style.width = 'auto';
+    clone.querySelectorAll<HTMLElement>('thead th').forEach((th) => (th.style.width = 'auto'));
+    clone.querySelectorAll('.explorer__group-row').forEach((row) => row.remove());
+
+    document.body.appendChild(clone);
+    const widths = [...clone.querySelectorAll('thead th')].map((th) => Math.ceil(th.getBoundingClientRect().width));
+    document.body.removeChild(clone);
+
+    if (widths.length < 5) {
+      return;
+    }
+    const [, size, type, createdAt, modifiedAt] = widths;
+    this.columnWidths.set({ size, type, createdAt, modifiedAt });
+  }
+
+  // ---- Keyboard navigation ----
+  //
+  // PrimeNG's [pSelectableRow] directive attaches its own keydown handler directly to each
+  // row (for accessibility), which fires before any bubble-phase listener on this component
+  // and fights over selection state. Listening in the capture phase - and stopping
+  // propagation for the keys we own - lets us take those keys before that handler ever sees
+  // them, instead of a `@HostListener('keydown')` (bubble phase, fires too late).
+
+  private readonly onKeyDown = (event: KeyboardEvent): void => {
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+      return;
+    }
+    if (this.promptDialog() || this.propertiesVisible() || this.previewVisible()) {
+      return;
+    }
+
+    const ctrl = event.ctrlKey || event.metaKey;
+
+    if (ctrl) {
+      switch (event.key) {
+        case 'a':
+        case 'A':
+          event.preventDefault();
+          event.stopPropagation();
+          this.selection.set([...this.displayRows()]);
+          break;
+        case 'c':
+        case 'C':
+          event.preventDefault();
+          event.stopPropagation();
+          this.copySelection();
+          break;
+        case 'x':
+        case 'X':
+          event.preventDefault();
+          event.stopPropagation();
+          this.cutSelection();
+          break;
+        case 'v':
+        case 'V':
+          event.preventDefault();
+          event.stopPropagation();
+          void this.paste();
+          break;
+      }
+      return;
+    }
+
+    const ownedKeys = ['ArrowDown', 'ArrowUp', 'Enter', 'Backspace', 'Delete', 'F2', 'Escape'];
+    if (ownedKeys.includes(event.key)) {
+      event.stopPropagation();
+    }
+
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        this.moveFocus(1, event.shiftKey);
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        this.moveFocus(-1, event.shiftKey);
+        break;
+      case 'Enter':
+        event.preventDefault();
+        this.activateFocused();
+        break;
+      case 'Backspace':
+        event.preventDefault();
+        this.goUp();
+        break;
+      case 'Delete':
+        event.preventDefault();
+        this.confirmDelete();
+        break;
+      case 'F2':
+        event.preventDefault();
+        this.openRename();
+        break;
+      case 'Escape':
+        this.selection.set([]);
+        break;
+      default:
+        // Any other printable character starts (or continues) an instant search, so the user
+        // doesn't have to click the search icon and hit Enter just to filter the current folder.
+        if (!event.altKey && event.key.length === 1) {
+          event.preventDefault();
+          event.stopPropagation();
+          this.startQuickSearch(event.key);
+        }
+        break;
+    }
+  };
+
+  private startQuickSearch(char: string): void {
+    if (!this.showSearchBox()) {
+      this.searchQuery = '';
+      this.showSearchBox.set(true);
+    }
+    this.searchQuery += char;
+    this.scheduleSearch();
+    // The search input only exists in the DOM once change detection processes the
+    // `@if (showSearchBox())` block, so `searchInputRef` isn't populated yet on the
+    // keystroke that first reveals it. Force a synchronous check here so the ViewChild
+    // (and its ngModel-bound value) is up to date before we try to focus it.
+    this.changeDetectorRef.detectChanges();
+    this.focusSearchInput();
+  }
+
+  private focusSearchInput(): void {
+    const el = this.searchInputRef?.nativeElement;
+    if (!el) {
+      return;
+    }
+    el.focus();
+    const end = el.value.length;
+    el.setSelectionRange(end, end);
+  }
+
+  scheduleSearch(): void {
+    if (this.searchDebounceHandle !== null) {
+      clearTimeout(this.searchDebounceHandle);
+    }
+    this.searchDebounceHandle = setTimeout(() => {
+      this.searchDebounceHandle = null;
+      void this.runSearch();
+    }, ExplorerComponent.SEARCH_DEBOUNCE_MS);
+  }
+
+  private moveFocus(delta: number, extend: boolean): void {
+    const rows = this.displayRows();
+    if (rows.length === 0) {
+      return;
+    }
+    const currentPath = this.focusedPath() ?? this.selection().at(-1)?.path ?? rows[0].path;
+    const currentIndex = Math.max(
+      0,
+      rows.findIndex((r) => r.path === currentPath),
+    );
+    const nextIndex = Math.min(rows.length - 1, Math.max(0, currentIndex + delta));
+    const nextRow = rows[nextIndex];
+    this.focusedPath.set(nextRow.path);
+
+    if (extend) {
+      this.anchorPath ??= currentPath;
+      this.selectRange(this.anchorPath, nextRow.path);
+    } else {
+      this.anchorPath = nextRow.path;
+      this.selection.set([nextRow]);
+    }
+    this.scrollRowIntoView(nextRow.path);
+  }
+
+  private selectRange(fromPath: string, toPath: string): void {
+    const rows = this.displayRows();
+    const fromIndex = rows.findIndex((r) => r.path === fromPath);
+    const toIndex = rows.findIndex((r) => r.path === toPath);
+    if (fromIndex === -1 || toIndex === -1) {
+      return;
+    }
+    const [start, end] = fromIndex <= toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
+    this.selection.set(rows.slice(start, end + 1));
+  }
+
+  private scrollRowIntoView(path: string): void {
+    queueMicrotask(() => {
+      const escaped = typeof CSS !== 'undefined' ? CSS.escape(path) : path;
+      const el = this.elementRef.nativeElement.querySelector(`[data-row-path="${escaped}"]`);
+      el?.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  private activateFocused(): void {
+    const path = this.focusedPath() ?? this.selection().at(-1)?.path;
+    const row = this.displayRows().find((r) => r.path === path);
+    if (row) {
+      this.onRowActivate(row);
+    }
+  }
+
+  // With `groupRowsBy` active (date grouping, everywhere except search mode), PrimeNG can't emit a
+  // plain `{ field, order }` on header click - it folds the clicked column into a multi-sort behind
+  // the group column and emits `{ multisortmeta }` instead. Handle both shapes so sorting keeps
+  // working regardless of whether grouping is on.
+  onSort(event: { field?: string; order?: number; multisortmeta?: { field: string; order: number }[] }): void {
+    if (event.multisortmeta) {
+      const meta = event.multisortmeta.find((m) => m.field !== 'dateGroupOrder') ?? event.multisortmeta.at(-1);
+      if (meta) {
+        this.sortField.set(meta.field);
+        this.sortOrder.set(meta.order);
+      }
+      return;
+    }
+    if (event.field) {
+      this.sortField.set(event.field);
+      this.sortOrder.set(event.order ?? 1);
+    }
+  }
+
+  onRowClick(entry: FileEntryRow): void {
+    this.focusedPath.set(entry.path);
+    this.anchorPath = entry.path;
+  }
+
+  // ---- Context menu ----
+
+  onRowContextMenu(event: MouseEvent, entry: FileEntryRow): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!this.selection().some((s) => s.path === entry.path)) {
+      this.selection.set([entry]);
+    }
+    this.focusedPath.set(entry.path);
+    this.anchorPath = entry.path;
+    this.contextMenuItems.set(this.buildRowMenu());
+    this.rowMenu.show(event);
+  }
+
+  onEmptyContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    this.selection.set([]);
+    this.contextMenuItems.set(this.buildEmptyMenu());
+    this.rowMenu.show(event);
+  }
+
+  private buildRowMenu(): MenuItem[] {
+    const selected = this.selection();
+    const single = selected.length === 1 ? selected[0] : null;
+    const items: MenuItem[] = [];
+
+    if (single?.isDirectory) {
+      items.push({ label: 'Open', icon: 'pi pi-folder-open', command: () => this.onRowActivate(single) });
+    } else if (single) {
+      items.push({ label: 'Preview', icon: 'pi pi-eye', command: () => this.openPreview(single) });
+    }
+
+    items.push(
+      { separator: true },
+      { label: 'Cut', icon: 'pi pi-arrows-alt', command: () => this.cutSelection() },
+      { label: 'Copy', icon: 'pi pi-copy', command: () => this.copySelection() },
+      { separator: true },
+      { label: 'Rename', icon: 'pi pi-pencil', disabled: selected.length !== 1, command: () => this.openRename() },
+      { label: 'Delete', icon: 'pi pi-trash', command: () => this.confirmDelete() },
+      { separator: true },
+      { label: 'Properties', icon: 'pi pi-info-circle', command: () => this.openProperties() },
+    );
+    return items;
+  }
+
+  private buildEmptyMenu(): MenuItem[] {
+    return [
+      { label: 'New folder', icon: 'pi pi-folder-plus', command: () => this.openNewFolder() },
+      { label: 'New file', icon: 'pi pi-file-plus', command: () => this.openNewFile() },
+      { separator: true },
+      { label: 'Paste', icon: 'pi pi-clipboard', disabled: !this.clipboard(), command: () => void this.paste() },
+    ];
+  }
+
+  // ---- Properties & preview ----
+
+  openProperties(): void {
+    if (this.selection().length === 0) {
+      return;
+    }
+    this.propertiesEntries.set([...this.selection()]);
+    this.propertiesVisible.set(true);
+  }
+
+  openPreview(entry: FileEntry): void {
+    this.previewEntry.set(entry);
+    this.previewVisible.set(true);
+  }
+
+  // ---- Search ----
+
+  toggleSearchBox(): void {
+    this.showSearchBox.update((v) => !v);
+    if (!this.showSearchBox()) {
+      this.exitSearch();
+    } else {
+      this.changeDetectorRef.detectChanges();
+      this.focusSearchInput();
+    }
+  }
+
+  onSearchEnter(): void {
+    if (this.searchDebounceHandle !== null) {
+      clearTimeout(this.searchDebounceHandle);
+      this.searchDebounceHandle = null;
+    }
+    void this.runSearch();
+  }
+
+  async runSearch(): Promise<void> {
+    const query = this.searchQuery.trim();
+    if (!query) {
+      this.exitSearch();
+      return;
+    }
+    this.searching.set(true);
+    this.searchMode.set(true);
+    try {
+      this.searchResults.set(await this.searchService.search(this.listing()?.path ?? '/', query));
+    } catch {
+      this.searchResults.set([]);
+    } finally {
+      this.searching.set(false);
+    }
+  }
+
+  exitSearch(): void {
+    if (this.searchDebounceHandle !== null) {
+      clearTimeout(this.searchDebounceHandle);
+      this.searchDebounceHandle = null;
+    }
+    this.searchMode.set(false);
+    this.searchResults.set([]);
+    this.searchQuery = '';
+  }
+
+  // ---- Rubber-band multiselect ----
+
+  onTableMouseDown(event: MouseEvent): void {
+    if (event.button !== 0) {
+      return;
+    }
+    const target = event.target as HTMLElement;
+    if (target.closest('tr[data-row-path]') || target.closest('th') || target.closest('button') || target.closest('a')) {
+      return;
+    }
+    event.preventDefault();
+    this.rubberBand = {
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+      anchorSelection: event.ctrlKey || event.metaKey || event.shiftKey ? [...this.selection()] : [],
+    };
+    window.addEventListener('mousemove', this.onRubberBandMove);
+    window.addEventListener('mouseup', this.onRubberBandUp);
+  }
+
+  private readonly onRubberBandMove = (event: MouseEvent): void => {
+    const band = this.rubberBand;
+    if (!band) {
+      return;
+    }
+    const dx = event.clientX - band.startX;
+    const dy = event.clientY - band.startY;
+    if (!band.active && Math.hypot(dx, dy) < ExplorerComponent.RUBBER_BAND_THRESHOLD) {
+      return;
+    }
+    band.active = true;
+    event.preventDefault();
+
+    const left = Math.min(band.startX, event.clientX);
+    const top = Math.min(band.startY, event.clientY);
+    const width = Math.abs(dx);
+    const height = Math.abs(dy);
+    this.selectionBox.set({ left, top, width, height });
+
+    const rect = { left, top, right: left + width, bottom: top + height };
+    const matched = this.displayRows().filter((row) => {
+      const escaped = typeof CSS !== 'undefined' ? CSS.escape(row.path) : row.path;
+      const el = this.elementRef.nativeElement.querySelector(`[data-row-path="${escaped}"]`);
+      if (!el) {
+        return false;
+      }
+      const r = el.getBoundingClientRect();
+      return r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top;
+    });
+
+    const merged = [...band.anchorSelection];
+    for (const row of matched) {
+      if (!merged.some((s) => s.path === row.path)) {
+        merged.push(row);
+      }
+    }
+    this.selection.set(merged);
+  };
+
+  private readonly onRubberBandUp = (): void => {
+    this.rubberBand = null;
+    this.selectionBox.set(null);
+    window.removeEventListener('mousemove', this.onRubberBandMove);
+    window.removeEventListener('mouseup', this.onRubberBandUp);
+  };
+
+  // ---- Drag & drop ----
+
+  onDragStart(event: DragEvent, entry: FileEntryRow): void {
+    const selected = this.selection();
+    const paths = selected.some((s) => s.path === entry.path) ? selected.map((s) => s.path) : [entry.path];
+    this.dragPaths = paths;
+    event.dataTransfer?.setData('text/plain', JSON.stringify(paths));
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'copyMove';
+    }
+  }
+
+  onRowDragOver(event: DragEvent, entry: FileEntryRow): void {
+    if (!entry.isDirectory || !this.dragPaths) {
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = event.ctrlKey ? 'copy' : 'move';
+    }
+  }
+
+  async onRowDrop(event: DragEvent, entry: FileEntryRow): Promise<void> {
+    event.preventDefault();
+    const dragPaths = this.dragPaths;
+    this.dragPaths = null;
+    if (!entry.isDirectory || !dragPaths) {
+      return;
+    }
+    const paths = dragPaths.filter((p) => p !== entry.path);
+    if (paths.length === 0) {
+      return;
+    }
+    const mode = event.ctrlKey ? 'Copy' : 'Move';
+    await this.operationsService.create(mode, paths, entry.path);
+    this.messageService.add({
+      severity: 'info',
+      summary: mode === 'Copy' ? 'Copying' : 'Moving',
+      detail: 'Started in background - see Tasks for progress.',
+    });
+    setTimeout(() => this.refresh(), 600);
+  }
+
+  // ---- Create / rename ----
+
+  openNewFolder(): void {
+    this.openPrompt('New folder', 'Folder name', '', async (name) => {
+      await this.filesService.createEntry(this.listing()?.path ?? '/', name, true);
+      this.refresh();
+    });
+  }
+
+  openNewFile(): void {
+    this.openPrompt('New file', 'File name', '', async (name) => {
+      await this.filesService.createEntry(this.listing()?.path ?? '/', name, false);
+      this.refresh();
+    });
+  }
+
+  openRename(): void {
+    const entry = this.selection()[0];
+    if (!entry) {
+      return;
+    }
+    this.openPrompt('Rename', 'New name', entry.name, async (name) => {
+      await this.filesService.rename(entry.path, name);
+      this.refresh();
+    });
+  }
+
+  private openPrompt(title: string, label: string, initialValue: string, onConfirm: (value: string) => Promise<void>): void {
+    this.promptValue = initialValue;
+    this.promptDialog.set({ title, label, onConfirm });
+  }
+
+  async confirmPrompt(): Promise<void> {
+    const prompt = this.promptDialog();
+    if (!prompt || !this.promptValue.trim()) {
+      return;
+    }
+    try {
+      await prompt.onConfirm(this.promptValue.trim());
+      this.promptDialog.set(null);
+    } catch (error) {
+      this.messageService.add({ severity: 'error', summary: 'Failed', detail: this.extractError(error) });
+    }
+  }
+
+  cancelPrompt(): void {
+    this.promptDialog.set(null);
+  }
+
+  // ---- Delete / clipboard ----
+
+  confirmDelete(): void {
+    const paths = this.selection().map((entry) => entry.path);
+    if (paths.length === 0) {
+      return;
+    }
+    this.confirmationService.confirm({
+      header: 'Delete',
+      message: `Move ${paths.length} item(s) to the Trash?`,
+      icon: 'pi pi-exclamation-triangle',
+      acceptButtonProps: { severity: 'danger', label: 'Delete' },
+      accept: () => void this.handleDeleteConfirmed(paths),
+    });
+  }
+
+  private async handleDeleteConfirmed(paths: string[]): Promise<void> {
+    let hasSpace: boolean;
+    try {
+      hasSpace = await this.trashService.checkSpace(paths);
+    } catch {
+      // Don't block the delete on a failed space check - the job itself falls back to a permanent
+      // delete if it turns out there really isn't room.
+      hasSpace = true;
+    }
+
+    if (hasSpace) {
+      await this.deleteSelection(paths, false);
+      return;
+    }
+
+    this.confirmationService.confirm({
+      header: 'Not enough space for Trash',
+      message: `There isn't enough free space to move ${paths.length} item(s) to the Trash. Delete them permanently instead? This cannot be undone.`,
+      icon: 'pi pi-exclamation-triangle',
+      acceptButtonProps: { severity: 'danger', label: 'Delete permanently' },
+      accept: () => void this.deleteSelection(paths, true),
+    });
+  }
+
+  private async deleteSelection(paths: string[], permanent: boolean): Promise<void> {
+    await this.operationsService.create('Delete', paths);
+    this.messageService.add({
+      severity: 'info',
+      summary: 'Deleting',
+      detail: permanent ? 'Permanently deleting - see Tasks for progress.' : 'Moved to Trash - see Tasks for progress.',
+    });
+    const deleted = new Set(paths);
+    this.selection.set(this.selection().filter((entry) => !deleted.has(entry.path)));
+    if (this.searchMode()) {
+      this.searchResults.set(this.searchResults().filter((entry) => !deleted.has(entry.path)));
+    }
+    setTimeout(() => this.refresh(), 600);
+  }
+
+  copySelection(): void {
+    const paths = this.selection().map((entry) => entry.path);
+    if (paths.length > 0) {
+      this.clipboard.set({ mode: 'copy', paths });
+    }
+  }
+
+  cutSelection(): void {
+    const paths = this.selection().map((entry) => entry.path);
+    if (paths.length > 0) {
+      this.clipboard.set({ mode: 'cut', paths });
+    }
+  }
+
+  async paste(): Promise<void> {
+    const clip = this.clipboard();
+    const destination = this.listing()?.path;
+    if (!clip || !destination || clip.paths.length === 0) {
+      return;
+    }
+
+    await this.operationsService.create(clip.mode === 'copy' ? 'Copy' : 'Move', clip.paths, destination);
+    this.messageService.add({
+      severity: 'info',
+      summary: clip.mode === 'copy' ? 'Copying' : 'Moving',
+      detail: 'Started in background - see Tasks for progress.',
+    });
+    if (clip.mode === 'cut') {
+      this.clipboard.set(null);
+    }
+    setTimeout(() => this.refresh(), 600);
+  }
+
+  private extractError(error: unknown): string {
+    if (error && typeof error === 'object' && 'response' in error) {
+      const response = (error as { response?: { data?: { message?: string } } }).response;
+      if (response?.data?.message) {
+        return response.data.message;
+      }
+    }
+    return 'Something went wrong.';
+  }
+}

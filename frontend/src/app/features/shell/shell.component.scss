@@ -1,0 +1,42 @@
+:host {
+  display: block;
+  height: 100vh;
+}
+
+.shell {
+  display: grid;
+  height: 100%;
+}
+
+.shell__sidebar {
+  min-width: 0;
+  overflow: hidden;
+  height: 100%;
+}
+
+.shell__resizer {
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    margin: 0 auto;
+    width: 1px;
+    background: var(--p-content-border-color, #e5e7eb);
+  }
+
+  &:hover::after,
+  &:active::after {
+    width: 3px;
+    background: var(--p-primary-color, #6366f1);
+  }
+}
+
+.shell__main {
+  min-width: 0;
+  height: 100%;
+  overflow: auto;
+}

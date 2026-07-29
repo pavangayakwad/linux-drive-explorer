@@ -1,0 +1,117 @@
+<p-dialog
+  header="Properties"
+  [(visible)]="visible"
+  [modal]="true"
+  [style]="{ width: '26rem' }"
+  (visibleChange)="visibleChange.emit($event)"
+>
+  @if (primaryEntry) {
+    <p-tabs value="0">
+      <p-tablist>
+        <p-tab value="0">General</p-tab>
+        <p-tab value="1">Permissions</p-tab>
+      </p-tablist>
+      <p-tabpanels>
+        <p-tabpanel value="0">
+          <div class="properties">
+            <div class="properties__header">
+              <i [class]="fileIconClass(primaryEntry.isDirectory, primaryEntry.extension)" class="properties__icon"></i>
+              <span>{{ isMultiple ? entries.length + ' items selected' : primaryEntry.name }}</span>
+            </div>
+
+            <div class="properties__row">
+              <span class="properties__label">Type</span>
+              <span>{{ commonTypeLabel }}</span>
+            </div>
+            <div class="properties__row">
+              <span class="properties__label">Size</span>
+              <span>
+                {{ formatBytes(totalSize) }}
+                @if (isCalculatingSize) {
+                  <span class="properties__calculating">· calculating…</span>
+                }
+              </span>
+            </div>
+            @if (!isMultiple) {
+              <div class="properties__row">
+                <span class="properties__label">Location</span>
+                <span class="properties__value-wrap">{{ primaryEntry.path }}</span>
+              </div>
+              <div class="properties__row">
+                <span class="properties__label">Created</span>
+                <span>{{ formatDateTime(primaryEntry.createdAt) }}</span>
+              </div>
+              <div class="properties__row">
+                <span class="properties__label">Modified</span>
+                <span>{{ formatDateTime(primaryEntry.modifiedAt) }}</span>
+              </div>
+            }
+          </div>
+        </p-tabpanel>
+
+        <p-tabpanel value="1">
+          @if (loading()) {
+            <div class="properties__loading">Loading permissions...</div>
+          } @else if (permissions() && !permissions()!.supported) {
+            <p-message severity="warn" text="Permissions can only be viewed and changed when the API is running on Linux." />
+          } @else {
+            <div class="properties permissions">
+              <div class="permissions__owners">
+                <label>
+                  Owner
+                  <p-select [options]="principals().users" optionLabel="name" optionValue="name" [(ngModel)]="selectedOwner" [editable]="true" placeholder="owner" />
+                </label>
+                <label>
+                  Group
+                  <p-select [options]="principals().groups" optionLabel="name" optionValue="name" [(ngModel)]="selectedGroup" [editable]="true" placeholder="group" />
+                </label>
+              </div>
+
+              <table class="permissions__grid">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Read</th>
+                    <th>Write</th>
+                    <th>Execute</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Owner</td>
+                    <td><p-checkbox [binary]="true" [(ngModel)]="ownerRead" /></td>
+                    <td><p-checkbox [binary]="true" [(ngModel)]="ownerWrite" /></td>
+                    <td><p-checkbox [binary]="true" [(ngModel)]="ownerExecute" /></td>
+                  </tr>
+                  <tr>
+                    <td>Group</td>
+                    <td><p-checkbox [binary]="true" [(ngModel)]="groupRead" /></td>
+                    <td><p-checkbox [binary]="true" [(ngModel)]="groupWrite" /></td>
+                    <td><p-checkbox [binary]="true" [(ngModel)]="groupExecute" /></td>
+                  </tr>
+                  <tr>
+                    <td>Others</td>
+                    <td><p-checkbox [binary]="true" [(ngModel)]="otherRead" /></td>
+                    <td><p-checkbox [binary]="true" [(ngModel)]="otherWrite" /></td>
+                    <td><p-checkbox [binary]="true" [(ngModel)]="otherExecute" /></td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="permissions__octal">Mode: {{ computedOctal }}</div>
+
+              @if (errorMessage()) {
+                <p-message severity="error" [text]="errorMessage()!" />
+              }
+
+              <div class="permissions__actions">
+                <p-button label="Cancel" [text]="true" (onClick)="close()" />
+                <p-button label="Apply" [loading]="saving()" (onClick)="save()" />
+              </div>
+            </div>
+          }
+        </p-tabpanel>
+      </p-tabpanels>
+    </p-tabs>
+  }
+</p-dialog>

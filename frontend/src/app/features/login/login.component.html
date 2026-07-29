@@ -1,0 +1,28 @@
+<div class="login-page">
+  <form class="login-card" (ngSubmit)="submit()">
+    <div class="login-card__header">
+      <img src="app-icon.svg" alt="" class="login-card__icon" width="48" height="48" />
+      <h1>Drive Explorer</h1>
+      <p>Sign in to manage files on this server</p>
+    </div>
+
+    <label for="username">Username</label>
+    <input id="username" type="text" pInputText name="username" [(ngModel)]="username" autocomplete="username" />
+
+    <label for="password">Password</label>
+    <p-password
+      id="password"
+      name="password"
+      [(ngModel)]="password"
+      [feedback]="false"
+      [toggleMask]="true"
+      autocomplete="current-password"
+    />
+
+    @if (errorMessage()) {
+      <p-message severity="error" [text]="errorMessage()!" />
+    }
+
+    <p-button type="submit" label="Sign in" [loading]="loading()" class="login-card__submit" />
+  </form>
+</div>

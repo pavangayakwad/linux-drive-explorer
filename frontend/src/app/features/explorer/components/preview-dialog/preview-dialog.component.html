@@ -1,0 +1,35 @@
+<p-dialog
+  [header]="entry?.name ?? 'Preview'"
+  [(visible)]="visible"
+  [modal]="true"
+  [style]="{ width: '48rem' }"
+  [contentStyle]="{ 'max-height': '75vh', overflow: 'auto' }"
+  (visibleChange)="visibleChange.emit($event)"
+>
+  @if (loading()) {
+    <div class="preview__status">Loading preview...</div>
+  } @else if (errorMessage()) {
+    <p-message severity="error" [text]="errorMessage()!" />
+  } @else {
+    @switch (kind()) {
+      @case ('image') {
+        <img [src]="objectUrl()" class="preview__image" [alt]="entry?.name" />
+      }
+      @case ('pdf') {
+        <iframe [src]="objectUrl()" class="preview__pdf" title="PDF preview"></iframe>
+      }
+      @case ('audio') {
+        <audio [src]="objectUrl()" controls class="preview__media"></audio>
+      }
+      @case ('video') {
+        <video [src]="objectUrl()" controls class="preview__media"></video>
+      }
+      @case ('text') {
+        <pre class="preview__text">{{ textContent() }}</pre>
+      }
+      @default {
+        <div class="preview__status">No preview available for this file type.</div>
+      }
+    }
+  }
+</p-dialog>

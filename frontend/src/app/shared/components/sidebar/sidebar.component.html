@@ -1,0 +1,69 @@
+<nav class="sidebar">
+  <div class="sidebar__brand">
+    <img src="app-icon.svg" alt="" class="sidebar__brand-icon" width="24" height="24" />
+    <span class="sidebar__brand-name">Drive Explorer</span>
+  </div>
+
+  <div class="sidebar__top-row">
+    <button type="button" class="sidebar__item sidebar__item--home" [class.sidebar__item--active]="currentPath === '/'" (click)="navigate.emit('/')">
+      <i class="pi pi-home"></i>
+      <span>Home</span>
+    </button>
+    <button
+      type="button"
+      class="sidebar__refresh-btn"
+      [disabled]="refreshingDrives"
+      pTooltip="Refresh drives"
+      tooltipPosition="right"
+      (click)="refreshDrives.emit()"
+    >
+      <i class="pi pi-refresh" [class.sidebar__refresh-icon--spinning]="refreshingDrives"></i>
+    </button>
+  </div>
+
+  <div class="sidebar__section-label">Drives</div>
+
+  @for (drive of drives; track drive.mountPath) {
+    <button type="button" class="sidebar__item sidebar__item--drive" [class.sidebar__item--active]="isActive(drive)" (click)="select(drive)">
+      <i [class]="drive.isRemovable ? 'pi pi-box' : 'pi pi-server'" [pTooltip]="drive.isRemovable ? 'Removable drive' : 'Fixed drive'" tooltipPosition="right"></i>
+      <div class="sidebar__drive-info">
+        <span class="sidebar__drive-name">{{ drive.name }}</span>
+        <div class="sidebar__usage-bar">
+          <div
+            class="sidebar__usage-fill"
+            [class.sidebar__usage-fill--critical]="usedFraction(drive) > 0.9"
+            [style.width.%]="usedFraction(drive) * 100"
+          ></div>
+        </div>
+        <span class="sidebar__drive-space">{{ formatBytes(drive.freeBytes) }} free of {{ formatBytes(drive.totalBytes) }}</span>
+      </div>
+    </button>
+  } @empty {
+    <div class="sidebar__empty">No drives detected</div>
+  }
+
+  <span class="sidebar__spacer"></span>
+
+  <a routerLink="/tasks" routerLinkActive="sidebar__item--active" class="sidebar__item">
+    <i class="pi pi-list-check"></i>
+    <span>Tasks</span>
+    @if (runningTaskCount > 0) {
+      <span class="sidebar__badge">{{ runningTaskCount }}</span>
+    }
+  </a>
+  <a routerLink="/trash" routerLinkActive="sidebar__item--active" class="sidebar__item">
+    <i class="pi pi-trash"></i>
+    <span>Trash</span>
+  </a>
+
+  <div class="sidebar__divider"></div>
+
+  <button type="button" class="sidebar__item sidebar__user" (click)="userMenu.toggle($event)">
+    <i class="pi pi-user"></i>
+    <span>{{ authService.username() }}</span>
+    <i class="pi pi-chevron-down"></i>
+  </button>
+  <p-menu #userMenu [model]="userMenuItems()" [popup]="true" appendTo="body" />
+</nav>
+
+<app-change-password-dialog [visible]="changePasswordVisible()" (visibleChange)="changePasswordVisible.set($event)" />

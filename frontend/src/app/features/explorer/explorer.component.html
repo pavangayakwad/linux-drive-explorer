@@ -1,0 +1,186 @@
+<div class="explorer__main">
+  <div class="explorer__pathbar">
+    <nav class="explorer__breadcrumb">
+      @if (searchMode()) {
+        <span class="explorer__search-label"><i class="pi pi-search"></i> Results for "{{ searchQuery }}"</span>
+      } @else {
+        @for (segment of breadcrumb; track segment.path; let last = $last) {
+          <button type="button" (click)="navigateTo(segment.path)" [class.explorer__breadcrumb-current]="last">
+            {{ segment.label }}
+          </button>
+          @if (!last) {
+            <i class="pi pi-angle-right"></i>
+          }
+        }
+      }
+    </nav>
+  </div>
+
+  <div class="explorer__toolbar">
+    <p-button icon="pi pi-arrow-up" [text]="true" [disabled]="!listing()?.parentPath" (onClick)="goUp()" pTooltip="Up" />
+    <p-button icon="pi pi-refresh" [text]="true" (onClick)="refresh()" pTooltip="Refresh" />
+
+    <span class="explorer__divider"></span>
+
+    <p-button icon="pi pi-folder-plus" [text]="true" (onClick)="openNewFolder()" pTooltip="New folder" />
+    <p-button icon="pi pi-file-plus" [text]="true" (onClick)="openNewFile()" pTooltip="New file" />
+    <p-button [text]="true" [disabled]="selection().length === 0" (onClick)="cutSelection()" pTooltip="Cut">
+      <ng-template #icon let-class="class">
+        <svg [class]="class" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+          <path
+            d="M9.64 7.64c.23-.5.36-1.05.36-1.64 0-2.21-1.79-4-4-4S2 3.79 2 6s1.79 4 4 4c.59 0 1.14-.13 1.64-.36L10 12l-2.36 2.36C7.14 14.13 6.59 14 6 14c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.59-.13-1.14-.36-1.64L12 14l7 7h3v-1L9.64 7.64zM6 8c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm0 12c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm6-7.5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zM19 3l-6 6 2 2 7-7V3z"
+          />
+        </svg>
+      </ng-template>
+    </p-button>
+    <p-button icon="pi pi-copy" [text]="true" [disabled]="selection().length === 0" (onClick)="copySelection()" pTooltip="Copy" />
+    <p-button icon="pi pi-clipboard" [text]="true" [disabled]="!clipboard()" (onClick)="paste()" pTooltip="Paste" />
+    <p-button icon="pi pi-pencil" [text]="true" [disabled]="selection().length !== 1" (onClick)="openRename()" pTooltip="Rename" />
+    <p-button icon="pi pi-trash" [text]="true" severity="danger" [disabled]="selection().length === 0" (onClick)="confirmDelete()" pTooltip="Delete" />
+    <p-button icon="pi pi-info-circle" [text]="true" [disabled]="selection().length === 0" (onClick)="openProperties()" pTooltip="Properties" />
+    <p-button
+      icon="pi pi-chart-bar"
+      [text]="true"
+      [class.explorer__toggle-active]="showFolderSizes()"
+      (onClick)="toggleFolderSizes()"
+      pTooltip="Show folder sizes"
+    />
+
+    <span class="explorer__divider"></span>
+
+    <p-button icon="pi pi-search" [text]="true" (onClick)="toggleSearchBox()" pTooltip="Search" />
+    @if (showSearchBox()) {
+      <input
+        #searchInput
+        type="text"
+        pInputText
+        [(ngModel)]="searchQuery"
+        (ngModelChange)="scheduleSearch()"
+        (keydown.enter)="onSearchEnter()"
+        placeholder="Search this folder..."
+        class="explorer__search-input"
+      />
+      @if (searchMode()) {
+        <p-button icon="pi pi-times" [text]="true" (onClick)="exitSearch()" pTooltip="Clear search" />
+      }
+    }
+  </div>
+
+  @if (errorMessage()) {
+    <div class="explorer__error">{{ errorMessage() }}</div>
+  }
+
+  <div class="explorer__table-wrap" (contextmenu)="onEmptyContextMenu($event)" (mousedown)="onTableMouseDown($event)">
+    <p-table
+      class="explorer__table"
+      [value]="displayRows()"
+      [loading]="loading() || searching()"
+      [(selection)]="selection"
+      [sortField]="sortField()"
+      [sortOrder]="sortOrder()"
+      [customSort]="true"
+      (onSort)="onSort($event)"
+      selectionMode="multiple"
+      [metaKeySelection]="true"
+      dataKey="path"
+      [scrollable]="true"
+      scrollHeight="flex"
+      [groupRowsBy]="searchMode() ? undefined : 'dateGroupOrder'"
+      [groupRowsByOrder]="1"
+      [rowGroupMode]="searchMode() ? undefined : 'subheader'"
+      [size]="'small'"
+      [resizableColumns]="true"
+      columnResizeMode="expand"
+    >
+      <ng-template pTemplate="header">
+        <tr>
+          <th pSortableColumn="name" pResizableColumn>Name <p-sortIcon field="name" /></th>
+          <th pSortableColumn="sizeBytes" [style.width.px]="columnWidths().size">Size <p-sortIcon field="sizeBytes" /></th>
+          <th pSortableColumn="typeLabel" [style.width.px]="columnWidths().type">Type <p-sortIcon field="typeLabel" /></th>
+          <th pSortableColumn="createdAt" [style.width.px]="columnWidths().createdAt">Date created <p-sortIcon field="createdAt" /></th>
+          <th pSortableColumn="modifiedAt" [style.width.px]="columnWidths().modifiedAt">Date modified <p-sortIcon field="modifiedAt" /></th>
+        </tr>
+      </ng-template>
+      <ng-template pTemplate="groupheader" let-entry>
+        <tr class="explorer__group-row">
+          <td colspan="5">{{ dateGroupLabel(entry.dateGroupOrder) }}</td>
+        </tr>
+      </ng-template>
+      <ng-template pTemplate="body" let-entry let-rowIndex="rowIndex">
+        <tr
+          [pSelectableRow]="entry"
+          [pSelectableRowIndex]="rowIndex"
+          [attr.data-row-path]="entry.path"
+          [class.explorer__focused-row]="entry.path === focusedPath()"
+          draggable="true"
+          (click)="onRowClick(entry)"
+          (dblclick)="onRowActivate(entry)"
+          (contextmenu)="onRowContextMenu($event, entry)"
+          (dragstart)="onDragStart($event, entry)"
+          (dragover)="onRowDragOver($event, entry)"
+          (drop)="onRowDrop($event, entry)"
+        >
+          <td>
+            <i [class]="fileIconClass(entry.isDirectory, entry.extension)"></i>
+            <span>{{ entry.name }}</span>
+            @if (searchMode()) {
+              <span class="explorer__search-path">{{ entry.path }}</span>
+            }
+          </td>
+          <td class="explorer__size-cell">
+            @if (entry.isDirectory) {
+              @if (showFolderSizes()) {
+                @if (folderSizeFor(entry.path); as size) {
+                  {{ size.status === 'Running' ? '…' : formatBytes(size.bytes) }}
+                } @else {
+                  …
+                }
+              }
+            } @else {
+              {{ formatBytes(entry.sizeBytes) }}
+            }
+          </td>
+          <td>{{ entry.typeLabel }}</td>
+          <td>{{ formatDateTime(entry.createdAt) }}</td>
+          <td>{{ formatDateTime(entry.modifiedAt) }}</td>
+        </tr>
+      </ng-template>
+      <ng-template pTemplate="emptymessage">
+        <tr>
+          <td colspan="5" class="explorer__empty">
+            {{ searchMode() ? 'No matches found.' : 'This folder is empty.' }}
+          </td>
+        </tr>
+      </ng-template>
+    </p-table>
+  </div>
+
+  @if (selectionBox(); as box) {
+    <div
+      class="explorer__selection-box"
+      [style.left.px]="box.left"
+      [style.top.px]="box.top"
+      [style.width.px]="box.width"
+      [style.height.px]="box.height"
+    ></div>
+  }
+</div>
+
+<p-contextMenu #rowMenu [model]="contextMenuItems()" />
+
+<app-properties-dialog [visible]="propertiesVisible()" [entries]="propertiesEntries()" (visibleChange)="propertiesVisible.set($event)" />
+
+<app-preview-dialog [visible]="previewVisible()" [entry]="previewEntry()" (visibleChange)="previewVisible.set($event)" />
+
+@if (promptDialog(); as prompt) {
+  <p-dialog [header]="prompt.title" [visible]="true" [modal]="true" [style]="{ width: '22rem' }" (onHide)="cancelPrompt()">
+    <form (ngSubmit)="confirmPrompt()">
+      <label for="promptValue">{{ prompt.label }}</label>
+      <input id="promptValue" type="text" pInputText [(ngModel)]="promptValue" name="promptValue" autofocus style="width: 100%; margin-top: 0.4rem" />
+      <div class="explorer__prompt-actions">
+        <p-button label="Cancel" [text]="true" type="button" (onClick)="cancelPrompt()" />
+        <p-button label="OK" type="submit" />
+      </div>
+    </form>
+  </p-dialog>
+}
