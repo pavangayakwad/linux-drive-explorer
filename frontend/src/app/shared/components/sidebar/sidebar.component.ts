@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, computed, EventEmitter, Input, Output, signal } from '@angular/core';
+import { Component, computed, ElementRef, EventEmitter, HostListener, Input, Output, QueryList, ViewChildren, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { MenuItem } from 'primeng/api';
 import { MenuModule } from 'primeng/menu';
@@ -33,6 +33,8 @@ export class SidebarComponent {
   @Output() readonly navigate = new EventEmitter<string>();
   @Output() readonly refreshDrives = new EventEmitter<void>();
 
+  @ViewChildren('driveItem') private readonly driveItems?: QueryList<ElementRef<HTMLButtonElement>>;
+
   readonly changePasswordVisible = signal(false);
 
   // PrimeNG's p-menu switches its ENTIRE model to grouped/submenu rendering as soon as any
@@ -63,6 +65,39 @@ export class SidebarComponent {
 
   logout(): void {
     void this.authService.logout();
+  }
+
+  // Alt+1 jumps focus straight to the drives panel (the currently active drive if one is
+  // visible, otherwise the first drive) so keyboard users don't have to Tab through the rest
+  // of the sidebar to get there.
+  @HostListener('document:keydown', ['$event'])
+  onGlobalKeyDown(event: KeyboardEvent): void {
+    if (!event.altKey || event.key !== '1') {
+      return;
+    }
+    const buttons = this.driveItems?.toArray() ?? [];
+    if (buttons.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    const activeIndex = this.drives.findIndex((drive) => this.isActive(drive));
+    buttons[activeIndex >= 0 ? activeIndex : 0].nativeElement.focus();
+  }
+
+  // Lets arrow keys move focus between drive entries the same way Tab already does, instead of
+  // only supporting Tab-order navigation once focus has landed in the drives list (e.g. via Alt+1).
+  onDriveKeyDown(event: KeyboardEvent, index: number): void {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+      return;
+    }
+    const buttons = this.driveItems?.toArray() ?? [];
+    if (buttons.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    const delta = event.key === 'ArrowDown' ? 1 : -1;
+    const nextIndex = Math.min(buttons.length - 1, Math.max(0, index + delta));
+    buttons[nextIndex].nativeElement.focus();
   }
 
   usedFraction(drive: DriveSummary): number {

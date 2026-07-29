@@ -52,6 +52,38 @@ interface DataColumnWidths {
   modifiedAt: number;
 }
 
+interface SortPreference {
+  field: string;
+  order: number;
+}
+
+const SORT_STORAGE_KEY = 'fx_sort_preference';
+const DEFAULT_SORT: SortPreference = { field: 'modifiedAt', order: -1 };
+
+function loadSortPreference(): SortPreference {
+  try {
+    const raw = localStorage.getItem(SORT_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_SORT;
+    }
+    const parsed = JSON.parse(raw) as Partial<SortPreference>;
+    if (typeof parsed.field === 'string' && (parsed.order === 1 || parsed.order === -1)) {
+      return { field: parsed.field, order: parsed.order };
+    }
+  } catch {
+    // ignore malformed storage
+  }
+  return DEFAULT_SORT;
+}
+
+function saveSortPreference(preference: SortPreference): void {
+  try {
+    localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(preference));
+  } catch {
+    // Best-effort only - a full/unavailable localStorage shouldn't break sorting.
+  }
+}
+
 @Component({
   selector: 'app-explorer',
   standalone: true,
@@ -86,14 +118,20 @@ export class ExplorerComponent implements OnInit, OnDestroy {
   readonly previewVisible = signal(false);
   readonly previewEntry = signal<FileEntry | null>(null);
   readonly contextMenuItems = signal<MenuItem[]>([]);
-  readonly sortField = signal('modifiedAt');
-  readonly sortOrder = signal(-1);
+  // Initialized from localStorage (see loadSortPreference) so the last column/direction the user
+  // picked applies from the moment the app loads, in every drive - not just the current session.
+  private readonly initialSort = loadSortPreference();
+  readonly sortField = signal(this.initialSort.field);
+  readonly sortOrder = signal(this.initialSort.order);
   readonly showSearchBox = signal(false);
   readonly searchMode = signal(false);
   readonly searching = signal(false);
   readonly searchResults = signal<FileEntry[]>([]);
   readonly selectionBox = signal<{ left: number; top: number; width: number; height: number } | null>(null);
   readonly folderSizes = signal<ReadonlyMap<string, FolderSizeState>>(new Map());
+  // Set after a fresh listing loads so an afterRenderEffect can move real DOM focus onto the
+  // first row once it actually exists in the DOM - see the constructor and focusRowElement.
+  private readonly pendingFocusPath = signal<string | null>(null);
   // Measured from the actual rendered cells (see measureColumnWidths) so each data column is exactly as
   // wide as its content needs and no wider - any space left over goes to the Name column.
   readonly columnWidths = signal<DataColumnWidths>({ size: 64, type: 112, createdAt: 168, modifiedAt: 168 });
@@ -173,6 +211,15 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       this.displayRows();
       this.measureColumnWidths();
     });
+
+    afterRenderEffect(() => {
+      const path = this.pendingFocusPath();
+      if (!path) {
+        return;
+      }
+      this.focusRowElement(path);
+      this.pendingFocusPath.set(null);
+    });
   }
 
   ngOnInit(): void {
@@ -218,12 +265,13 @@ export class ExplorerComponent implements OnInit, OnDestroy {
 
     await this.performLoad(path);
 
+    this.driveNavState.recordVisit(path);
+
     const mountPath = this.driveNavState.mountPathFor(path);
     this.lastMountPath = mountPath;
     if (!mountPath) {
       return;
     }
-    this.driveNavState.savePath(mountPath, path);
     if (mountPath !== previousMountPath) {
       const rememberedQuery = this.driveNavState.getSearch(mountPath);
       if (rememberedQuery) {
@@ -246,6 +294,7 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       this.focusedPath.set(firstRow?.path ?? null);
       this.anchorPath = firstRow?.path ?? null;
       this.trackVisibleFolderSizes();
+      this.pendingFocusPath.set(firstRow?.path ?? null);
     } catch {
       this.errorMessage.set(`Could not open "${path}".`);
     } finally {
@@ -342,6 +391,13 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
       return;
     }
+    // This listener is on `document` (see ngOnInit) so quick-search still works before anything
+    // inside the explorer has taken real DOM focus - but that means it must not hijack keys meant
+    // for a control focused elsewhere in the app (e.g. Enter on a sidebar drive button). Only handle
+    // the event when focus is inside the explorer itself, or nowhere in particular (document.body).
+    if (target !== document.body && !this.elementRef.nativeElement.contains(target)) {
+      return;
+    }
     if (this.promptDialog() || this.propertiesVisible() || this.previewVisible()) {
       return;
     }
@@ -385,7 +441,7 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const ownedKeys = ['ArrowDown', 'ArrowUp', 'Enter', 'Backspace', 'Delete', 'F2', 'Escape'];
+    const ownedKeys = ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Enter', 'Backspace', 'Delete', 'F2', 'Escape'];
     if (ownedKeys.includes(event.key)) {
       event.stopPropagation();
     }
@@ -398,6 +454,14 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       case 'ArrowUp':
         event.preventDefault();
         this.moveFocus(-1, event.shiftKey);
+        break;
+      case 'PageDown':
+        event.preventDefault();
+        this.moveFocus(Infinity, event.shiftKey);
+        break;
+      case 'PageUp':
+        event.preventDefault();
+        this.moveFocus(-Infinity, event.shiftKey);
         break;
       case 'Enter':
         event.preventDefault();
@@ -508,6 +572,20 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     });
   }
 
+  // Moves real DOM focus onto a row (called after a fresh listing loads - see pendingFocusPath)
+  // so arrow-key navigation keeps working immediately, without requiring the user to click into
+  // the list first. Skipped while focus is genuinely needed elsewhere (a text input or a dialog)
+  // so this doesn't steal focus mid-rename or mid-search.
+  private focusRowElement(path: string): void {
+    const active = document.activeElement as HTMLElement | null;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.closest('[role="dialog"], [role="alertdialog"]'))) {
+      return;
+    }
+    const escaped = typeof CSS !== 'undefined' ? CSS.escape(path) : path;
+    const el = this.elementRef.nativeElement.querySelector<HTMLElement>(`[data-row-path="${escaped}"]`);
+    el?.focus();
+  }
+
   private activateFocused(): void {
     const path = this.focusedPath() ?? this.selection().at(-1)?.path;
     const row = this.displayRows().find((r) => r.path === path);
@@ -518,8 +596,10 @@ export class ExplorerComponent implements OnInit, OnDestroy {
 
   onSort(event: { field?: string; order?: number }): void {
     if (event.field) {
+      const order = event.order ?? 1;
       this.sortField.set(event.field);
-      this.sortOrder.set(event.order ?? 1);
+      this.sortOrder.set(order);
+      saveSortPreference({ field: event.field, order });
     }
   }
 

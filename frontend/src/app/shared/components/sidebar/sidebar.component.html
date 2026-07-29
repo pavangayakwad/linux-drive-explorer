@@ -23,8 +23,15 @@
 
   <div class="sidebar__section-label">Drives</div>
 
-  @for (drive of drives; track drive.mountPath) {
-    <button type="button" class="sidebar__item sidebar__item--drive" [class.sidebar__item--active]="isActive(drive)" (click)="select(drive)">
+  @for (drive of drives; track drive.mountPath; let i = $index) {
+    <button
+      #driveItem
+      type="button"
+      class="sidebar__item sidebar__item--drive"
+      [class.sidebar__item--active]="isActive(drive)"
+      (click)="select(drive)"
+      (keydown)="onDriveKeyDown($event, i)"
+    >
       <i [class]="drive.isRemovable ? 'pi pi-box' : 'pi pi-server'" [pTooltip]="drive.isRemovable ? 'Removable drive' : 'Fixed drive'" tooltipPosition="right"></i>
       <div class="sidebar__drive-info">
         <span class="sidebar__drive-name">{{ drive.name }}</span>
