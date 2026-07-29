@@ -1,25 +1,76 @@
-# Linux File Explorer
+<p align="center">
+  <img src="frontend/public/app-icon.svg" width="88" height="88" alt="Linux File Explorer icon" />
+</p>
 
-A browser-based file manager for a Linux host, styled after Windows Explorer's Details
-view. ASP.NET Core 10 API (running as root, with full filesystem access) + SQLite +
-Angular/PrimeNG frontend.
+<h1 align="center">Linux File Explorer</h1>
+
+<p align="center">
+  A fast, browser-based file manager for a Linux host, styled after Windows Explorer's
+  Details view — full filesystem access, background copy/move/delete jobs, a proper
+  Trash, permissions editing, and rich keyboard navigation.
+</p>
+
+<p align="center">
+  <img alt="Backend" src="https://img.shields.io/badge/backend-ASP.NET%20Core%2010-512bd4?logo=dotnet&logoColor=white">
+  <img alt="Frontend" src="https://img.shields.io/badge/frontend-Angular%20%2B%20PrimeNG-dd0031?logo=angular&logoColor=white">
+  <img alt="Database" src="https://img.shields.io/badge/db-SQLite-003b57?logo=sqlite&logoColor=white">
+  <img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-blue">
+  <img alt="Docker" src="https://img.shields.io/badge/deploy-Docker%20Compose-2496ed?logo=docker&logoColor=white">
+</p>
+
+---
+
+## Contents
+
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Architecture](#architecture)
+- [Quick start with Docker Compose](#quick-start-with-docker-compose)
+- [Keyboard navigation](#keyboard-navigation)
+- [Local development (without Docker)](#local-development-without-docker)
+- [Troubleshooting](#troubleshooting)
+- [Project layout reference](#project-layout-reference)
 
 ## Features
 
-- Details-view file listing with sortable columns, Windows-style date grouping
-  (Today / Yesterday / Last week / …), multi-select, keyboard navigation
-  (arrows, Shift+arrows, Ctrl+A, Enter, Backspace, F2, Delete, Ctrl+C/X/V), and a
-  right-click context menu.
-- Copy / move / delete run as durable background jobs (they keep running even if you
-  close the browser), with live progress on the **Tasks** page over SignalR.
-- Deletes move items to a per-drive hidden Trash instead of deleting immediately;
-  restore or permanently purge from the **Trash** page.
-- Left-hand drive list with free-space bars; the sidebar is resizable and shared
-  across Explorer/Tasks/Trash.
-- Properties dialog: size/type/dates, plus a Permissions tab to view/change
-  owner, group and rwx bits (chmod/chown) - only functional when the API runs on Linux.
-- File preview (images, text, PDF, audio, video) and recursive filename search.
-- JWT-based login with a change-password flow.
+- **Details-view file listing** — sortable columns, Windows-style date grouping
+  (Today / Yesterday / Last week / …), multi-select via click, `Shift`/`Ctrl`, or a
+  mouse rubber-band drag, and a right-click context menu.
+- **Full keyboard navigation** — arrows, `Shift`+arrows, `Ctrl+A`, `Enter`,
+  `Backspace`, `F2`, `Delete`, `Ctrl+C`/`X`/`V`, and instant type-ahead search. See the
+  [Keyboard navigation](#keyboard-navigation) section for the complete reference.
+- **Durable background jobs** — copy, move, and delete run as background jobs that keep
+  running even if you close the browser tab, with live progress on the **Tasks** page
+  pushed over SignalR.
+- **Safe deletes** — deleting moves items to a per-drive hidden Trash instead of
+  removing them immediately; restore or permanently purge from the **Trash** page.
+- **Drive sidebar** — left-hand drive list with free-space usage bars; the sidebar is
+  resizable and its width is shared across Explorer, Tasks, and Trash.
+- **Properties & permissions** — a Properties dialog shows size/type/dates, plus a
+  Permissions tab to view and change owner, group, and rwx bits (`chmod`/`chown`) when
+  the API runs on Linux.
+- **File preview** — inline preview for images, text, PDF, audio, and video, without
+  leaving the listing.
+- **Recursive filename search** — search the current folder and everything beneath it.
+- **JWT-based auth** — login with a change-password flow; no anonymous access.
+
+## Screenshots
+
+| | |
+|---|---|
+| **Login** | ![Login screen](docs/screenshots/login.png) |
+| **Explorer — Details view** | ![Explorer details view with date grouping](docs/screenshots/explorer-details-view.png) |
+| **Right-click context menu** | ![Context menu with file operations](docs/screenshots/context-menu.png) |
+| **Multi-select** | ![Multiple files selected](docs/screenshots/multi-select.png) |
+| **Properties → Permissions tab** | ![Properties dialog Permissions tab — chmod/chown grid on Linux, a fallback notice elsewhere](docs/screenshots/properties-permissions.png) |
+| **File preview** | ![Image preview dialog](docs/screenshots/file-preview.png) |
+| **Background Tasks page** | ![Tasks page showing background job history and progress](docs/screenshots/tasks-page.png) |
+| **Trash page** | ![Trash page with restore/purge actions](docs/screenshots/trash-page.png) |
+| **Recursive search** | ![Search results across subfolders](docs/screenshots/search.png) |
+
+Screenshots above are from the local dev sandbox (`backend/.devroot`), which is why the
+sidebar shows "No drives detected" and the Permissions tab shows its Linux-only notice —
+the dev API runs on whatever OS you're developing on, not necessarily Linux.
 
 ## Architecture
 
@@ -31,67 +82,71 @@ docker-compose.yml           two containers: api (Kestrel) + web (nginx serving 
 ```
 
 The API treats one configured physical directory as its "root" (`FileSystem:RootPath`,
-default `/host_root`) - every path the client sees is relative to that. In Docker, the
+default `/host_root`) — every path the client sees is relative to that. In Docker, the
 host's real `/` is bind-mounted there, so the API can reach anything the host can.
 
-**This API is designed to run as root** so it can browse, chmod and chown anywhere on
+**This API is designed to run as root** so it can browse, chmod, and chown anywhere on
 the host. Treat it accordingly: keep it off the public internet, put it behind a
 trusted network/VPN, and always set a strong `JWT_KEY` and admin password (see below).
 
-## Local development (without Docker)
+## Quick start with Docker Compose
 
-Requires the .NET 10 SDK and Node 22+.
+This is the recommended way to run the app. It builds two containers — `api` (the
+.NET backend) and `web` (nginx serving the built Angular app and proxying `/api` and
+`/hubs` to the API) — wired together by `docker-compose.yml`.
+
+**Prerequisites:** Docker Engine + Docker Compose v2 (or Docker Desktop on
+Windows/Mac).
+
+### 1. Clone the repository
 
 ```bash
-# Terminal 1 - API (listens on http://localhost:5266, per Properties/launchSettings.json)
-cd backend/FileExplorer.Api
-dotnet run
-
-# Terminal 2 - Angular dev server (proxies /api and /hubs to the API - see proxy.conf.json)
-cd frontend
-npm install
-npm start
+git clone https://github.com/pavangayakwad/linux-drive-explorer.git
+cd linux-drive-explorer
 ```
 
-Open http://localhost:4200. In development, `FileSystem:RootPath` points at
-`backend/.devroot` (a small sandbox folder, not your real filesystem) and the admin
-login is `admin` / `admin123` - see `appsettings.Development.json`. This sandboxing is
-intentional: local dev never touches your real files, and drives won't show up in the
-sidebar unless `.devroot` happens to contain mount points of its own.
+### 2. Configure environment variables
 
-## Running with Docker (production)
+Copy the example env file and fill in a strong JWT signing key:
 
-1. Copy `.env.example` to `.env` and fill in `JWT_KEY` (and optionally
-   `ADMIN_USERNAME`/`ADMIN_PASSWORD` - if you leave the password blank, a random one is
-   generated and printed once to the logs on first startup).
+```bash
+cp .env.example .env
+openssl rand -base64 48   # copy the output into JWT_KEY below
+```
 
-   ```bash
-   cp .env.example .env
-   openssl rand -base64 48   # paste the result into JWT_KEY
-   ```
+Edit `.env`:
 
-2. Start it:
+```dotenv
+# Required — 32+ random characters used to sign JWTs
+JWT_KEY=<paste the generated value here>
 
-   ```bash
-   docker compose up -d --build
-   ```
+# Optional — admin login. Leave ADMIN_PASSWORD blank to have a random
+# password generated and printed once to the logs on first startup.
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=
+```
 
-3. Open `http://<host>:8080`. Check the generated admin password if you didn't set one:
+### 3. Choose what the app can see
 
-   ```bash
-   docker compose logs api | grep -A2 "Password:"
-   ```
+By default, `docker-compose.yml` bind-mounts the **entire host filesystem** (`/`) into
+the `api` container at `/host_root` with `rslave` propagation, so every mount on the
+host — including drives plugged in *after* the container starts — is browsable
+automatically:
 
-### Volume mounts - adjust for your host
+```yaml
+services:
+  api:
+    volumes:
+      - fx-data:/data
+      - type: bind
+        source: /                # host path — use "/" on Linux
+        target: /host_root
+        bind:
+          propagation: rslave
+```
 
-The default `docker-compose.yml` bind-mounts the entire host `/` into the `api`
-container at `/host_root` with `rslave` propagation, so every mount already on the
-host (including anything under `/mnt`) is browsable, and drives mounted *after* the
-container starts also appear automatically. This is the simplest setup and matches
-"browse everything."
-
-If you'd rather expose only specific locations, replace that mount with a narrower
-list, e.g.:
+If you'd rather expose only specific locations, replace that bind mount with a
+narrower list instead, e.g.:
 
 ```yaml
 volumes:
@@ -101,9 +156,114 @@ volumes:
 ```
 
 Whatever you mount, it must appear under `/host_root` inside the container (or update
-`FileSystem__RootPath` to match a different mount point).
+`FileSystem__RootPath` to point at a different mount point).
 
-### Troubleshooting: "port is not available" on Windows (Docker Desktop)
+### 4. Build and start the containers
+
+```bash
+docker compose up -d --build
+```
+
+This builds the `api` and `web` images and starts both containers in the background.
+
+### 5. Open the app
+
+Navigate to `http://<host>:8080` (the port `web` is published on in
+`docker-compose.yml`).
+
+If you left `ADMIN_PASSWORD` blank, fetch the generated password from the logs before
+your first login:
+
+```bash
+docker compose logs api | grep -A2 "Password:"
+```
+
+### 6. Day-to-day operations
+
+```bash
+docker compose logs -f api      # tail API logs
+docker compose logs -f web      # tail nginx logs
+docker compose restart api      # restart just the API
+docker compose down             # stop and remove containers (keeps volumes)
+docker compose up -d --build    # rebuild after pulling new code
+```
+
+### HTTPS
+
+The `web` container serves plain HTTP. For anything beyond a trusted LAN, put a
+TLS-terminating reverse proxy (Caddy, Traefik, or nginx with a certificate) in front of
+it rather than exposing the port directly to the internet.
+
+## Keyboard navigation
+
+The Explorer is fully operable from the keyboard once focus is inside the file
+listing (click a row, or `Tab` into the grid, to give it focus).
+
+### Selection & navigation
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Move focus to the previous/next row |
+| `Shift` + `↑` / `↓` | Extend the current selection up or down |
+| `Page Up` / `Page Down` | Jump focus to the first/last row |
+| `Shift` + `Page Up` / `Page Down` | Extend the selection to the first/last row |
+| `Ctrl` + `A` | Select every item in the current folder |
+| `Escape` | Clear the current selection |
+| Click | Select a single row |
+| `Ctrl` / `Cmd` + Click | Toggle an individual row in/out of the selection |
+| `Shift` + Click | Select a contiguous range from the last-clicked row |
+| Click-drag on empty space | Rubber-band (lasso) select multiple rows |
+
+### Opening & navigating folders
+
+| Key | Action |
+|---|---|
+| `Enter` | Open the focused folder, or open/preview the focused file |
+| `Backspace` | Go up one folder level |
+
+### File operations
+
+| Key | Action |
+|---|---|
+| `Ctrl` + `C` | Copy the selected items |
+| `Ctrl` + `X` | Cut the selected items |
+| `Ctrl` + `V` | Paste into the current folder (runs as a background job) |
+| `F2` | Rename the focused item |
+| `Delete` | Move the selected items to Trash (with confirmation) |
+
+Drag-and-drop also works with the mouse: drag files onto a folder to move them, or
+hold `Ctrl` while dragging to copy instead.
+
+### Instant search
+
+Just start typing while the listing has focus — any printable character opens the
+quick-search box and filters the current folder as you type, without needing to click
+a search icon first.
+
+## Local development (without Docker)
+
+Requires the .NET 10 SDK and Node 22+.
+
+```bash
+# Terminal 1 — API (listens on http://localhost:5266, per Properties/launchSettings.json)
+cd backend/FileExplorer.Api
+dotnet run
+
+# Terminal 2 — Angular dev server (proxies /api and /hubs to the API — see proxy.conf.json)
+cd frontend
+npm install
+npm start
+```
+
+Open http://localhost:4200. In development, `FileSystem:RootPath` points at
+`backend/.devroot` (a small sandbox folder, not your real filesystem) and the admin
+login is `admin` / `admin123` — see `appsettings.Development.json`. This sandboxing is
+intentional: local dev never touches your real files, and drives won't show up in the
+sidebar unless `.devroot` happens to contain mount points of its own.
+
+## Troubleshooting
+
+### "Port is not available" on Windows (Docker Desktop)
 
 Windows periodically reserves ranges of TCP ports for Hyper-V/WSL, which can make port
 8080 (or others) fail to bind with a permissions-looking error even though nothing else
@@ -117,18 +277,12 @@ If 8080 falls in a listed range, either restart Windows (ranges are reassigned o
 reboot) or just map `web` to a different, free host port in `docker-compose.yml`
 (e.g. `"9500:80"`).
 
-### HTTPS
-
-The `web` container serves plain HTTP on port 8080. For anything beyond a trusted LAN,
-put a TLS-terminating reverse proxy (Caddy, Traefik, or nginx with a cert) in front of
-it rather than exposing 8080 directly.
-
 ## Project layout reference
 
-- `backend/FileExplorer.Api/Controllers` - REST endpoints (auth, files, drives,
+- `backend/FileExplorer.Api/Controllers` — REST endpoints (auth, files, drives,
   operations, tasks, trash, permissions, search)
-- `backend/FileExplorer.Api/Services/Jobs` - background job queue + worker that
+- `backend/FileExplorer.Api/Services/Jobs` — background job queue + worker that
   executes copy/move/delete/purge
-- `frontend/src/app/features` - `shell` (sidebar/layout), `explorer`, `tasks`, `trash`,
+- `frontend/src/app/features` — `shell` (sidebar/layout), `explorer`, `tasks`, `trash`,
   `login`
-- `frontend/src/app/core` - axios client, auth/token handling, typed API services
+- `frontend/src/app/core` — axios client, auth/token handling, typed API services
