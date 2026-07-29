@@ -146,7 +146,7 @@ export class ShellComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** Shows a prominent, sticky warning whenever a delete job falls back to permanently deleting
+  /** Shows a prominent warning whenever a delete job falls back to permanently deleting
    * an item because its drive had no room left to hold a trashed copy. */
   private warnAboutPermanentDeletes(job: Job): void {
     const names = job.permanentlyDeletedNames;
@@ -161,7 +161,6 @@ export class ShellComponent implements OnInit, OnDestroy {
       severity: 'warn',
       summary: 'Permanently deleted - not moved to Trash',
       detail: `Not enough free disk space to keep ${newNames.length === 1 ? `"${newNames[0]}"` : `${newNames.length} items`} in Trash, so ${newNames.length === 1 ? 'it was' : 'they were'} deleted permanently. This cannot be undone.`,
-      sticky: true,
     });
   }
 

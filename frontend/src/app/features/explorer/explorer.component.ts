@@ -345,6 +345,13 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     if (this.promptDialog() || this.propertiesVisible() || this.previewVisible()) {
       return;
     }
+    // The delete confirmation dialog (and any other PrimeNG dialog/overlay) isn't tracked by a
+    // local signal here, so detect it generically: if focus is inside a dialog/alertdialog (e.g.
+    // the confirm dialog's Yes/No buttons), let the browser's native Enter/Space button-activation
+    // behavior run instead of stealing the key for row navigation or quick search.
+    if (target.closest('[role="dialog"], [role="alertdialog"]')) {
+      return;
+    }
 
     const ctrl = event.ctrlKey || event.metaKey;
 
