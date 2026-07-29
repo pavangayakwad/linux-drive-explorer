@@ -93,7 +93,7 @@
   align-items: center;
   gap: 0.6rem;
   padding: 0.45rem 0.6rem;
-  border: none;
+  border: 2px solid transparent;
   background: transparent;
   border-radius: 6px;
   cursor: pointer;
@@ -110,6 +110,7 @@
     background: var(--p-primary-50, #eef2ff);
     color: var(--p-primary-color, #6366f1);
     font-weight: 600;
+    border-color: var(--p-primary-color, #6366f1);
   }
 
   &--drive {

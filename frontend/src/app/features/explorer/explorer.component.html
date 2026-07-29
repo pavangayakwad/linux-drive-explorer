@@ -38,13 +38,6 @@
     <p-button icon="pi pi-pencil" [text]="true" [disabled]="selection().length !== 1" (onClick)="openRename()" pTooltip="Rename" />
     <p-button icon="pi pi-trash" [text]="true" severity="danger" [disabled]="selection().length === 0" (onClick)="confirmDelete()" pTooltip="Delete" />
     <p-button icon="pi pi-info-circle" [text]="true" [disabled]="selection().length === 0" (onClick)="openProperties()" pTooltip="Properties" />
-    <p-button
-      icon="pi pi-chart-bar"
-      [text]="true"
-      [class.explorer__toggle-active]="showFolderSizes()"
-      (onClick)="toggleFolderSizes()"
-      pTooltip="Show folder sizes"
-    />
 
     <span class="explorer__divider"></span>
 
@@ -85,9 +78,6 @@
       dataKey="path"
       [scrollable]="true"
       scrollHeight="flex"
-      [groupRowsBy]="searchMode() ? undefined : 'dateGroupOrder'"
-      [groupRowsByOrder]="1"
-      [rowGroupMode]="searchMode() ? undefined : 'subheader'"
       [size]="'small'"
       [resizableColumns]="true"
       columnResizeMode="expand"
@@ -101,26 +91,19 @@
           <th pSortableColumn="modifiedAt" [style.width.px]="columnWidths().modifiedAt">Date modified <p-sortIcon field="modifiedAt" /></th>
         </tr>
       </ng-template>
-      <ng-template pTemplate="groupheader" let-entry>
-        <tr class="explorer__group-row">
-          <td colspan="5">{{ dateGroupLabel(entry.dateGroupOrder) }}</td>
-        </tr>
-      </ng-template>
       <ng-template pTemplate="body" let-entry let-rowIndex="rowIndex">
         <tr
           [pSelectableRow]="entry"
           [pSelectableRowIndex]="rowIndex"
           [attr.data-row-path]="entry.path"
           [class.explorer__focused-row]="entry.path === focusedPath()"
-          draggable="true"
           (click)="onRowClick(entry)"
           (dblclick)="onRowActivate(entry)"
           (contextmenu)="onRowContextMenu($event, entry)"
-          (dragstart)="onDragStart($event, entry)"
           (dragover)="onRowDragOver($event, entry)"
           (drop)="onRowDrop($event, entry)"
         >
-          <td>
+          <td class="explorer__name-cell" draggable="true" (dragstart)="onDragStart($event, entry)">
             <i [class]="fileIconClass(entry.isDirectory, entry.extension)"></i>
             <span>{{ entry.name }}</span>
             @if (searchMode()) {
@@ -129,12 +112,10 @@
           </td>
           <td class="explorer__size-cell">
             @if (entry.isDirectory) {
-              @if (showFolderSizes()) {
-                @if (folderSizeFor(entry.path); as size) {
-                  {{ size.status === 'Running' ? '…' : formatBytes(size.bytes) }}
-                } @else {
-                  …
-                }
+              @if (folderSizeFor(entry.path); as size) {
+                {{ size.status === 'Running' ? '…' : formatBytes(size.bytes) }}
+              } @else {
+                …
               }
             } @else {
               {{ formatBytes(entry.sizeBytes) }}

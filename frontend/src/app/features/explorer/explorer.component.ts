@@ -24,23 +24,15 @@ import { TooltipModule } from 'primeng/tooltip';
 import { FilesService } from '../../core/services/files.service';
 import { OperationsService } from '../../core/services/operations.service';
 import { SearchService } from '../../core/services/search.service';
+import { DriveNavigationStateService } from '../../core/services/drive-navigation-state.service';
 import { TrashService } from '../../core/services/trash.service';
 import { DirectoryListing, FileEntry } from '../../core/models/file-system.model';
-import {
-  dateGroupLabel,
-  dateGroupOrder,
-  fileIconClass,
-  formatBytes,
-  formatDateTime,
-  pathSegments,
-} from '../../shared/format.util';
+import { fileIconClass, formatBytes, formatDateTime, pathSegments } from '../../shared/format.util';
 import { PropertiesDialogComponent } from './components/properties-dialog/properties-dialog.component';
 import { PreviewDialogComponent } from './components/preview-dialog/preview-dialog.component';
 import { DirectorySizeTracker, FolderSizeState } from '../../shared/directory-size-tracker';
 
-interface FileEntryRow extends FileEntry {
-  dateGroupOrder: number;
-}
+type FileEntryRow = FileEntry;
 
 interface ClipboardState {
   mode: 'copy' | 'cut';
@@ -101,7 +93,6 @@ export class ExplorerComponent implements OnInit, OnDestroy {
   readonly searching = signal(false);
   readonly searchResults = signal<FileEntry[]>([]);
   readonly selectionBox = signal<{ left: number; top: number; width: number; height: number } | null>(null);
-  readonly showFolderSizes = signal(false);
   readonly folderSizes = signal<ReadonlyMap<string, FolderSizeState>>(new Map());
   // Measured from the actual rendered cells (see measureColumnWidths) so each data column is exactly as
   // wide as its content needs and no wider - any space left over goes to the Name column.
@@ -112,43 +103,49 @@ export class ExplorerComponent implements OnInit, OnDestroy {
   private anchorPath: string | null = null;
   private dragPaths: string[] | null = null;
   private queryParamSub?: Subscription;
+  // The mountPath the previous query-param navigation resolved to - lets onQueryParamsChanged
+  // tell "moved to a different drive" apart from "moved to another folder on the same drive".
+  private lastMountPath: string | null = null;
   private rubberBand: { startX: number; startY: number; active: boolean; anchorSelection: FileEntry[] } | null = null;
   private sizeTracker: DirectorySizeTracker;
   private searchDebounceHandle: ReturnType<typeof setTimeout> | null = null;
   private static readonly RUBBER_BAND_THRESHOLD = 4;
   private static readonly SEARCH_DEBOUNCE_MS = 250;
 
-  readonly rows = computed<FileEntryRow[]>(() =>
-    (this.listing()?.entries ?? []).map((entry) => ({
-      ...entry,
-      dateGroupOrder: dateGroupOrder(entry.modifiedAt),
-    })),
-  );
+  readonly rows = computed<FileEntryRow[]>(() => this.listing()?.entries ?? []);
 
   readonly sortedRows = computed<FileEntryRow[]>(() => {
     const rows = [...this.rows()];
     const field = this.sortField() as keyof FileEntryRow;
     const order = this.sortOrder();
+    const sortValue = (row: FileEntryRow) => (field === 'sizeBytes' ? this.sizeSortValue(row) : row[field]);
     rows.sort((a, b) => {
-      if (a.dateGroupOrder !== b.dateGroupOrder) {
-        return a.dateGroupOrder - b.dateGroupOrder;
-      }
-      const av = a[field];
-      const bv = b[field];
-      let cmp = 0;
-      if (av == null && bv != null) cmp = -1;
-      else if (av != null && bv == null) cmp = 1;
-      else if (av == null && bv == null) cmp = 0;
-      else if (typeof av === 'string' && typeof bv === 'string') cmp = av.localeCompare(bv);
-      else cmp = av! < bv! ? -1 : av! > bv! ? 1 : 0;
+      const av = sortValue(a);
+      const bv = sortValue(b);
+      // Nulls (e.g. a directory whose size hasn't finished computing) always sort last, regardless of sort direction.
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      const cmp = typeof av === 'string' && typeof bv === 'string' ? av.localeCompare(bv) : av < bv ? -1 : av > bv ? 1 : 0;
       return order * cmp;
     });
     return rows;
   });
 
+  // The Size column shows a directory's live-computed folder size (see folderSizeFor), not
+  // entry.sizeBytes - so sorting by size has to read from the same source the cell renders,
+  // otherwise directories sort by their (always-null) raw sizeBytes instead of what's on screen.
+  private sizeSortValue(row: FileEntryRow): number | null {
+    if (!row.isDirectory) {
+      return row.sizeBytes;
+    }
+    const size = this.folderSizeFor(row.path);
+    return size && size.status !== 'Running' ? size.bytes : null;
+  }
+
   readonly displayRows = computed<FileEntryRow[]>(() => {
     if (this.searchMode()) {
-      return this.searchResults().map((entry) => ({ ...entry, dateGroupOrder: 0 }));
+      return this.searchResults();
     }
     return this.sortedRows();
   });
@@ -156,13 +153,13 @@ export class ExplorerComponent implements OnInit, OnDestroy {
   readonly formatBytes = formatBytes;
   readonly formatDateTime = formatDateTime;
   readonly fileIconClass = fileIconClass;
-  readonly dateGroupLabel = dateGroupLabel;
 
   constructor(
     private readonly filesService: FilesService,
     private readonly operationsService: OperationsService,
     private readonly searchService: SearchService,
     private readonly trashService: TrashService,
+    private readonly driveNavState: DriveNavigationStateService,
     private readonly confirmationService: ConfirmationService,
     private readonly messageService: MessageService,
     private readonly route: ActivatedRoute,
@@ -180,15 +177,18 @@ export class ExplorerComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.queryParamSub = this.route.queryParamMap.subscribe((params) => {
-      this.exitSearch();
-      void this.performLoad(params.get('path') ?? '/');
+      void this.onQueryParamsChanged(params.get('path') ?? '/');
     });
-    this.elementRef.nativeElement.addEventListener('keydown', this.onKeyDown, true);
+    // Listening on `document` (rather than this component's own host element) means quick-search
+    // typing works even when nothing inside the explorer has taken real DOM focus yet - e.g. right
+    // after a folder loads, before the user has clicked a row. A listener on the host element only
+    // sees events whose target is a descendant of it, which requires focus to already be inside.
+    document.addEventListener('keydown', this.onKeyDown, true);
   }
 
   ngOnDestroy(): void {
     this.queryParamSub?.unsubscribe();
-    this.elementRef.nativeElement.removeEventListener('keydown', this.onKeyDown, true);
+    document.removeEventListener('keydown', this.onKeyDown, true);
     window.removeEventListener('mousemove', this.onRubberBandMove);
     window.removeEventListener('mouseup', this.onRubberBandUp);
     this.sizeTracker.dispose();
@@ -205,6 +205,35 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     void this.router.navigate([], { relativeTo: this.route, queryParams: { path } });
   }
 
+  // Runs on every path change coming from the URL - folder navigation, breadcrumb clicks, and
+  // drive switches all go through here. Only a drive switch (mountPath actually changes) saves
+  // and restores that drive's search query; plain in-drive navigation just clears the search UI,
+  // same as before, so browsing normally doesn't resurrect a search you just backed out of.
+  private async onQueryParamsChanged(path: string): Promise<void> {
+    const previousMountPath = this.lastMountPath;
+    if (previousMountPath && this.searchMode() && this.searchQuery.trim()) {
+      this.driveNavState.saveSearch(previousMountPath, this.searchQuery);
+    }
+    this.resetSearchUi();
+
+    await this.performLoad(path);
+
+    const mountPath = this.driveNavState.mountPathFor(path);
+    this.lastMountPath = mountPath;
+    if (!mountPath) {
+      return;
+    }
+    this.driveNavState.savePath(mountPath, path);
+    if (mountPath !== previousMountPath) {
+      const rememberedQuery = this.driveNavState.getSearch(mountPath);
+      if (rememberedQuery) {
+        this.searchQuery = rememberedQuery;
+        this.showSearchBox.set(true);
+        await this.runSearch();
+      }
+    }
+  }
+
   private async performLoad(path: string): Promise<void> {
     this.loading.set(true);
     this.errorMessage.set(null);
@@ -212,11 +241,11 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     try {
       const listing = await this.filesService.list(path);
       this.listing.set(listing);
-      this.selection.set([]);
-      this.focusedPath.set(null);
-      if (this.showFolderSizes()) {
-        this.trackVisibleFolderSizes();
-      }
+      const firstRow = this.sortedRows().at(0) ?? null;
+      this.selection.set(firstRow ? [firstRow] : []);
+      this.focusedPath.set(firstRow?.path ?? null);
+      this.anchorPath = firstRow?.path ?? null;
+      this.trackVisibleFolderSizes();
     } catch {
       this.errorMessage.set(`Could not open "${path}".`);
     } finally {
@@ -244,15 +273,6 @@ export class ExplorerComponent implements OnInit, OnDestroy {
   }
 
   // ---- Folder sizes ----
-
-  toggleFolderSizes(): void {
-    this.showFolderSizes.update((v) => !v);
-    if (this.showFolderSizes()) {
-      this.trackVisibleFolderSizes();
-    } else {
-      this.resetSizeTracker();
-    }
-  }
 
   folderSizeFor(path: string): FolderSizeState | undefined {
     return this.folderSizes().get(path);
@@ -297,7 +317,6 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     clone.style.tableLayout = 'auto';
     clone.style.width = 'auto';
     clone.querySelectorAll<HTMLElement>('thead th').forEach((th) => (th.style.width = 'auto'));
-    clone.querySelectorAll('.explorer__group-row').forEach((row) => row.remove());
 
     document.body.appendChild(clone);
     const widths = [...clone.querySelectorAll('thead th')].map((th) => Math.ceil(th.getBoundingClientRect().width));
@@ -490,19 +509,7 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     }
   }
 
-  // With `groupRowsBy` active (date grouping, everywhere except search mode), PrimeNG can't emit a
-  // plain `{ field, order }` on header click - it folds the clicked column into a multi-sort behind
-  // the group column and emits `{ multisortmeta }` instead. Handle both shapes so sorting keeps
-  // working regardless of whether grouping is on.
-  onSort(event: { field?: string; order?: number; multisortmeta?: { field: string; order: number }[] }): void {
-    if (event.multisortmeta) {
-      const meta = event.multisortmeta.find((m) => m.field !== 'dateGroupOrder') ?? event.multisortmeta.at(-1);
-      if (meta) {
-        this.sortField.set(meta.field);
-        this.sortOrder.set(meta.order);
-      }
-      return;
-    }
+  onSort(event: { field?: string; order?: number }): void {
     if (event.field) {
       this.sortField.set(event.field);
       this.sortOrder.set(event.order ?? 1);
@@ -620,7 +627,17 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     }
   }
 
+  // User-facing "stop searching" - unlike resetSearchUi, this also forgets the drive's
+  // remembered search query so switching away and back doesn't bring it back.
   exitSearch(): void {
+    this.resetSearchUi();
+    const mountPath = this.driveNavState.mountPathFor(this.listing()?.path ?? '/');
+    if (mountPath) {
+      this.driveNavState.clearSearch(mountPath);
+    }
+  }
+
+  private resetSearchUi(): void {
     if (this.searchDebounceHandle !== null) {
       clearTimeout(this.searchDebounceHandle);
       this.searchDebounceHandle = null;
@@ -636,8 +653,13 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     if (event.button !== 0) {
       return;
     }
+    // A mousedown on the Name cell is reserved for native drag-and-drop (see the draggable
+    // `<td>` in the template); starting a rubber-band drag there would fight the browser's own
+    // drag gesture. Mousedown on any other cell (size/type/date columns, or empty table space)
+    // begins rubber-band multiselect instead - single clicks are unaffected since selection
+    // there is still driven by PrimeNG's own click handling on the row.
     const target = event.target as HTMLElement;
-    if (target.closest('tr[data-row-path]') || target.closest('th') || target.closest('button') || target.closest('a')) {
+    if (target.closest('.explorer__name-cell') || target.closest('th') || target.closest('button') || target.closest('a')) {
       return;
     }
     event.preventDefault();

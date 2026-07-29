@@ -6,6 +6,7 @@ import * as signalR from '@microsoft/signalr';
 import { MessageService } from 'primeng/api';
 import { filter, map, startWith } from 'rxjs';
 import { DrivesService } from '../../core/services/drives.service';
+import { DriveNavigationStateService } from '../../core/services/drive-navigation-state.service';
 import { DriveSummary } from '../../core/models/file-system.model';
 import { Job } from '../../core/models/job.model';
 import { tokenStore } from '../../core/http/token-store';
@@ -25,6 +26,10 @@ const TERMINAL_JOB_STATUSES: ReadonlySet<Job['status']> = new Set(['Completed', 
 
 const DRIVES_POLL_INTERVAL_MS = 60_000;
 
+function sortDrivesByFreeSpace(drives: DriveSummary[]): DriveSummary[] {
+  return [...drives].sort((a, b) => b.freeBytes - a.freeBytes);
+}
+
 @Component({
   selector: 'app-shell',
   standalone: true,
@@ -34,6 +39,7 @@ const DRIVES_POLL_INTERVAL_MS = 60_000;
 })
 export class ShellComponent implements OnInit, OnDestroy {
   private readonly drivesService = inject(DrivesService);
+  private readonly driveNavState = inject(DriveNavigationStateService);
   private readonly tasksService = inject(TasksService);
   private readonly messageService = inject(MessageService);
   private readonly route = inject(ActivatedRoute);
@@ -86,10 +92,11 @@ export class ShellComponent implements OnInit, OnDestroy {
 
   async loadDrives(): Promise<void> {
     try {
-      this.drives.set(await this.drivesService.list());
+      this.drives.set(sortDrivesByFreeSpace(await this.drivesService.list()));
     } catch {
       this.drives.set([]);
     }
+    this.driveNavState.setDrives(this.drives());
   }
 
   async refreshDrives(): Promise<void> {

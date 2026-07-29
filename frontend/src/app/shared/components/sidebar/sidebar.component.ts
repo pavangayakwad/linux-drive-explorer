@@ -8,6 +8,7 @@ import { AuthService } from '../../../core/services/auth.service';
 import { ThemeService, THEME_COLORS } from '../../../core/services/theme.service';
 import { ThemeColor } from '../../../core/models/auth.model';
 import { DriveSummary } from '../../../core/models/file-system.model';
+import { DriveNavigationStateService } from '../../../core/services/drive-navigation-state.service';
 import { formatBytes } from '../../format.util';
 import { ChangePasswordDialogComponent } from '../change-password-dialog/change-password-dialog.component';
 
@@ -57,6 +58,7 @@ export class SidebarComponent {
   constructor(
     readonly authService: AuthService,
     private readonly themeService: ThemeService,
+    private readonly driveNavState: DriveNavigationStateService,
   ) {}
 
   logout(): void {
@@ -75,6 +77,8 @@ export class SidebarComponent {
   }
 
   select(drive: DriveSummary): void {
-    this.navigate.emit(drive.mountPath);
+    // Re-selecting a drive that's already been visited this session returns to the folder (and,
+    // via ExplorerComponent, the search) the user last left it at, rather than resetting to root.
+    this.navigate.emit(this.driveNavState.getPath(drive.mountPath) ?? drive.mountPath);
   }
 }

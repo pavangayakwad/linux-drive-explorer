@@ -31,37 +31,6 @@ export function formatDateTime(iso: string): string {
   return `${dd}-${mm}-${yyyy} ${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
 }
 
-const DATE_GROUP_LABELS = ['Today', 'Yesterday', 'Last week', 'Earlier this month', 'Earlier this year', 'Older'];
-
-function startOfDay(date: Date): number {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-}
-
-/** Buckets a timestamp the way Windows Explorer's "Date modified" grouping does. Lower = more recent. */
-export function dateGroupOrder(iso: string): number {
-  const modified = startOfDay(new Date(iso));
-  const today = startOfDay(new Date());
-  const dayMs = 24 * 60 * 60 * 1000;
-  const daysAgo = Math.round((today - modified) / dayMs);
-
-  if (daysAgo <= 0) return 0; // Today
-  if (daysAgo === 1) return 1; // Yesterday
-  if (daysAgo <= 7) return 2; // Last week
-  const modifiedDate = new Date(iso);
-  const now = new Date();
-  if (modifiedDate.getFullYear() === now.getFullYear() && modifiedDate.getMonth() === now.getMonth()) {
-    return 3; // Earlier this month
-  }
-  if (modifiedDate.getFullYear() === now.getFullYear()) {
-    return 4; // Earlier this year
-  }
-  return 5; // Older
-}
-
-export function dateGroupLabel(order: number): string {
-  return DATE_GROUP_LABELS[order] ?? 'Older';
-}
-
 export function pathSegments(path: string): { label: string; path: string }[] {
   if (path === '/' || path === '') {
     return [{ label: 'Root', path: '/' }];

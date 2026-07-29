@@ -77,10 +77,6 @@
   background: var(--p-content-border-color, #e5e7eb);
 }
 
-.explorer__toggle-active ::ng-deep .p-button-icon {
-  color: var(--p-primary-color, #6366f1);
-}
-
 .explorer__prompt-actions {
   display: flex;
   justify-content: flex-end;
@@ -178,7 +174,7 @@
     text-overflow: ellipsis;
   }
 
-  .p-datatable-table > .p-datatable-tbody > tr:not(.explorer__group-row) > td {
+  .p-datatable-table > .p-datatable-tbody > tr > td {
     font-size: 0.8125rem;
     padding-top: 0.28rem;
     padding-bottom: 0.28rem;
@@ -187,7 +183,7 @@
     text-overflow: ellipsis;
   }
 
-  .p-datatable-table > .p-datatable-tbody > tr:not(.explorer__group-row):hover {
+  .p-datatable-table > .p-datatable-tbody > tr:hover {
     background: var(--p-surface-100, #f3f4f6);
   }
 
@@ -198,15 +194,6 @@
   .p-datatable-table > .p-datatable-tbody > tr.explorer__focused-row {
     outline: 1px dashed var(--p-primary-color, #6366f1);
     outline-offset: -1px;
-  }
-
-  tr.explorer__group-row > td {
-    padding: 0.3rem 0.6rem;
-    font-size: 0.75rem;
-    font-weight: 700;
-    color: var(--p-text-muted-color, #6b7280);
-    background: var(--p-surface-50, #f9fafb);
-    border-bottom: 1px solid var(--p-content-border-color, #e5e7eb);
   }
 
   .p-contextmenu .p-contextmenu-item-label,

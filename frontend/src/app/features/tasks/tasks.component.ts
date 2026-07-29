@@ -75,8 +75,8 @@ export class TasksComponent implements OnInit, OnDestroy {
   }
 
   summary(job: Job): string {
-    const names = job.sources.map((s) => s.split('/').filter(Boolean).pop() ?? s);
-    const label = names.length <= 2 ? names.join(', ') : `${names[0]} and ${names.length - 1} more`;
+    const paths = job.sources;
+    const label = paths.length <= 2 ? paths.join(', ') : `${paths[0]} and ${paths.length - 1} more`;
     return job.destination ? `${label} → ${job.destination}` : label;
   }
 
