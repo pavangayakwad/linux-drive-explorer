@@ -219,7 +219,7 @@ listing (click a row, or `Tab` into the grid, to give it focus).
 | Key | Action |
 |---|---|
 | `Enter` | Open the focused folder, or open/preview the focused file |
-| `Backspace` | Go up one folder level |
+| `Backspace` / `Alt` + `↑` | Go up one folder level |
 
 ### File operations
 
@@ -234,11 +234,24 @@ listing (click a row, or `Tab` into the grid, to give it focus).
 Drag-and-drop also works with the mouse: drag files onto a folder to move them, or
 hold `Ctrl` while dragging to copy instead.
 
+Renaming or creating a new file/folder opens a small prompt dialog: `Enter` confirms
+it, `Escape` cancels. The same goes for the delete confirmation dialog — `Enter` /
+`Space` activates whichever button (Yes/No) has focus, so you never have to reach for
+the mouse to confirm or back out of a destructive action.
+
 ### Instant search
 
 Just start typing while the listing has focus — any printable character opens the
 quick-search box and filters the current folder as you type, without needing to click
-a search icon first.
+a search icon first. Press `Enter` in the search box to run the search immediately
+instead of waiting for the debounce timer.
+
+### Drives sidebar
+
+| Key | Action |
+|---|---|
+| `Alt` + `1` | Jump focus straight to the drives panel (the active drive, or the first one) |
+| `↑` / `↓` | Move focus between drives once the sidebar has focus |
 
 ## Local development (without Docker)
 
