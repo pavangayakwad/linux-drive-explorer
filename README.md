@@ -56,17 +56,21 @@
 
 ## Screenshots
 
-| | |
-|---|---|
-| **Login** | ![Login screen](docs/screenshots/login.png) |
-| **Explorer — Details view** | ![Explorer details view with date grouping](docs/screenshots/explorer-details-view.png) |
-| **Right-click context menu** | ![Context menu with file operations](docs/screenshots/context-menu.png) |
-| **Multi-select** | ![Multiple files selected](docs/screenshots/multi-select.png) |
-| **Properties → Permissions tab** | ![Properties dialog Permissions tab — chmod/chown grid on Linux, a fallback notice elsewhere](docs/screenshots/properties-permissions.png) |
-| **File preview** | ![Image preview dialog](docs/screenshots/file-preview.png) |
-| **Background Tasks page** | ![Tasks page showing background job history and progress](docs/screenshots/tasks-page.png) |
-| **Trash page** | ![Trash page with restore/purge actions](docs/screenshots/trash-page.png) |
-| **Recursive search** | ![Search results across subfolders](docs/screenshots/search.png) |
+The app supports both a light and a dark theme, switchable at any time from the user
+menu (**Appearance → Light/Dark**) — the choice is saved to `localStorage` and restored
+on your next visit.
+
+| | Light | Dark |
+|---|---|---|
+| **Login** | ![Login screen, light theme](docs/screenshots/login.png) | ![Login screen, dark theme](docs/screenshots/login-dark.png) |
+| **Explorer — Details view** | ![Explorer details view with date grouping, light theme](docs/screenshots/explorer-details-view.png) | ![Explorer details view with date grouping, dark theme](docs/screenshots/explorer-details-view-dark.png) |
+| **Right-click context menu** | ![Context menu with file operations, light theme](docs/screenshots/context-menu.png) | ![Context menu with file operations, dark theme](docs/screenshots/context-menu-dark.png) |
+| **Multi-select** | ![Multiple files selected, light theme](docs/screenshots/multi-select.png) | ![Multiple files selected, dark theme](docs/screenshots/multi-select-dark.png) |
+| **Properties → Permissions tab** | ![Properties dialog Permissions tab, light theme](docs/screenshots/properties-permissions.png) | ![Properties dialog Permissions tab, dark theme](docs/screenshots/properties-permissions-dark.png) |
+| **File preview** | ![Image preview dialog, light theme](docs/screenshots/file-preview.png) | ![Image preview dialog, dark theme](docs/screenshots/file-preview-dark.png) |
+| **Background Tasks page** | ![Tasks page showing background job history and progress, light theme](docs/screenshots/tasks-page.png) | ![Tasks page showing background job history and progress, dark theme](docs/screenshots/tasks-page-dark.png) |
+| **Trash page** | ![Trash page with restore/purge actions, light theme](docs/screenshots/trash-page.png) | ![Trash page with restore/purge actions, dark theme](docs/screenshots/trash-page-dark.png) |
+| **Recursive search** | ![Search results across subfolders, light theme](docs/screenshots/search.png) | ![Search results across subfolders, dark theme](docs/screenshots/search-dark.png) |
 
 Screenshots above are from the local dev sandbox (`backend/.devroot`), which is why the
 sidebar shows "No drives detected" and the Permissions tab shows its Linux-only notice —
