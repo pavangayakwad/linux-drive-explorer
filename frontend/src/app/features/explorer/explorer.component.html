@@ -93,12 +93,10 @@
       [scrollable]="true"
       scrollHeight="flex"
       [size]="'small'"
-      [resizableColumns]="true"
-      columnResizeMode="expand"
     >
       <ng-template pTemplate="header">
         <tr>
-          <th pSortableColumn="name" pResizableColumn>Name <p-sortIcon field="name" /></th>
+          <th pSortableColumn="name" class="explorer__name-header">Name <p-sortIcon field="name" /></th>
           <th pSortableColumn="sizeBytes" [style.width.px]="columnWidths().size">Size <p-sortIcon field="sizeBytes" /></th>
           <th pSortableColumn="typeLabel" [style.width.px]="columnWidths().type">Type <p-sortIcon field="typeLabel" /></th>
           <th pSortableColumn="createdAt" [style.width.px]="columnWidths().createdAt">Date created <p-sortIcon field="createdAt" /></th>
