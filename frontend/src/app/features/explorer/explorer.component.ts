@@ -49,11 +49,15 @@ interface PromptState {
 }
 
 interface DataColumnWidths {
+  name: number;
   size: number;
   type: number;
   createdAt: number;
   modifiedAt: number;
 }
+
+// Floor for the Name column so it's never squeezed away to nothing - see measureColumnWidths.
+const MIN_NAME_COLUMN_WIDTH = 192;
 
 interface SortPreference {
   field: string;
@@ -139,7 +143,13 @@ export class ExplorerComponent implements OnInit, OnDestroy {
   private readonly pendingFocusPath = signal<string | null>(null);
   // Measured from the actual rendered cells (see measureColumnWidths) so each data column is exactly as
   // wide as its content needs and no wider - any space left over goes to the Name column.
-  readonly columnWidths = signal<DataColumnWidths>({ size: 64, type: 112, createdAt: 168, modifiedAt: 168 });
+  readonly columnWidths = signal<DataColumnWidths>({
+    name: MIN_NAME_COLUMN_WIDTH,
+    size: 64,
+    type: 112,
+    createdAt: 168,
+    modifiedAt: 168,
+  });
   promptValue = '';
   searchQuery = '';
 
@@ -359,7 +369,7 @@ export class ExplorerComponent implements OnInit, OnDestroy {
   // would get wrong, like tabular-nums digit width on the Size column - without duplicating the
   // formatting/rendering logic. The clone is measured off-screen and discarded immediately.
   private measureColumnWidths(): void {
-    const table = this.elementRef.nativeElement.querySelector('.p-datatable-table');
+    const table = this.elementRef.nativeElement.querySelector('.p-datatable-table') as HTMLTableElement | null;
     if (!table) {
       return;
     }
@@ -381,7 +391,17 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       return;
     }
     const [, size, type, createdAt, modifiedAt] = widths;
-    this.columnWidths.set({ size, type, createdAt, modifiedAt });
+
+    // table-layout: fixed sizes an unspecified column from its own content width, *not* from the
+    // container's remaining space, and ignores min-width/max-width on its cells entirely - so the
+    // Name column has to get an explicit width too, computed as whatever's left over, or it can end
+    // up sized to little more than its header text. table.parentElement is the `#wrapper` div
+    // PrimeNG renders around the table (.p-datatable-table-container), which is sized by ordinary
+    // flex layout rather than the table's own fixed column algorithm.
+    const containerWidth = table.parentElement?.clientWidth ?? table.clientWidth;
+    const name = Math.max(MIN_NAME_COLUMN_WIDTH, containerWidth - size - type - createdAt - modifiedAt);
+
+    this.columnWidths.set({ name, size, type, createdAt, modifiedAt });
   }
 
   // ---- Keyboard navigation ----

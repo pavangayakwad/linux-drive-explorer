@@ -144,15 +144,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-// The Name column is the only one without an explicit width (see measureColumnWidths) - it
-// takes whatever space the fixed-width Size/Type/Date columns leave over. This floor keeps it
-// from ever being squeezed away to near-nothing; the Date columns are lowest priority and are
-// what should give way (via the table's horizontal scroll) if the window gets too narrow.
-.explorer__name-header,
-.explorer__name-cell {
-  min-width: 12rem;
-}
-
 :host ::ng-deep {
   .file-icon {
     margin-right: 0.5rem;
