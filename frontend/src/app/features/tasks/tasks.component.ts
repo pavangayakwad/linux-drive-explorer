@@ -103,18 +103,6 @@ export class TasksComponent implements OnInit, OnDestroy {
     await this.tasksService.cancel(job.id);
   }
 
-  canDownload(job: Job): boolean {
-    return job.type === 'Zip' && job.status === 'Completed';
-  }
-
-  async download(job: Job): Promise<void> {
-    try {
-      await this.tasksService.downloadZip(job.id);
-    } catch {
-      this.messageService.add({ severity: 'error', summary: 'Failed', detail: 'This archive is no longer available.' });
-    }
-  }
-
   confirmClearFinished(): void {
     this.confirmationService.confirm({
       header: 'Clear finished tasks',

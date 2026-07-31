@@ -132,11 +132,15 @@ export class ShellComponent implements OnInit, OnDestroy {
       .build();
 
     this.jobHubConnection.on('jobUpdated', (job: Job) => {
+      const previousStatus = this.jobStatuses.get(job.id);
       this.jobStatuses.set(job.id, job.status);
       this.recomputeRunningTaskCount();
       this.warnAboutPermanentDeletes(job);
       if (TERMINAL_JOB_STATUSES.has(job.status)) {
         void this.loadDrives();
+      }
+      if (job.type === 'Zip' && job.status === 'Completed' && previousStatus !== 'Completed') {
+        void this.autoDownloadZip(job);
       }
     });
 
@@ -163,6 +167,22 @@ export class ShellComponent implements OnInit, OnDestroy {
       summary: 'Permanently deleted - not moved to Trash',
       detail: `Not enough free disk space to keep ${newNames.length === 1 ? `"${newNames[0]}"` : `${newNames.length} items`} in Trash, so ${newNames.length === 1 ? 'it was' : 'they were'} deleted permanently. This cannot be undone.`,
     });
+  }
+
+  // Fires the browser download the moment a zip finishes, wherever the user currently is in the
+  // app, instead of making them go find the completed job in the Tasks list and click Download
+  // themselves. The server deletes the staged archive once this download's response completes
+  // (see FilesController.DownloadZip), so this is also the archive's only real chance to be fetched.
+  private async autoDownloadZip(job: Job): Promise<void> {
+    try {
+      await this.tasksService.downloadZip(job.id);
+    } catch {
+      this.messageService.add({
+        severity: 'error',
+        summary: 'Download failed',
+        detail: 'The archive could not be downloaded automatically. Open Tasks to try again.',
+      });
+    }
   }
 
   private recomputeRunningTaskCount(): void {

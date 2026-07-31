@@ -42,9 +42,6 @@
         </td>
         <td>{{ formatDateTime(job.createdAt) }}</td>
         <td>
-          @if (canDownload(job)) {
-            <p-button icon="pi pi-download" [text]="true" (onClick)="download(job)" pTooltip="Download" />
-          }
           @if (canCancel(job)) {
             <p-button icon="pi pi-times" [text]="true" severity="danger" (onClick)="cancel(job)" pTooltip="Cancel" />
           }

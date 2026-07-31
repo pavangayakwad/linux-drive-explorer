@@ -1,4 +1,5 @@
 using FileExplorer.Api.Data;
+using FileExplorer.Api.Filters;
 using FileExplorer.Api.Models.Dtos;
 using FileExplorer.Api.Models.Entities;
 using FileExplorer.Api.Options;
@@ -223,6 +224,7 @@ public class FilesController(
     /// </summary>
     [HttpPost("upload")]
     [DisableRequestSizeLimit]
+    [DisableFormValueModelBinding]
     public async Task<ActionResult<FileEntryDto>> Upload(CancellationToken ct)
     {
         var contentType = Request.ContentType;

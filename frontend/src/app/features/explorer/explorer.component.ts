@@ -459,7 +459,11 @@ export class ExplorerComponent implements OnInit, OnDestroy {
         break;
       case 'ArrowUp':
         event.preventDefault();
-        this.moveFocus(-1, event.shiftKey);
+        if (event.altKey) {
+          this.goUp();
+        } else {
+          this.moveFocus(-1, event.shiftKey);
+        }
         break;
       case 'PageDown':
         event.preventDefault();
@@ -834,6 +838,9 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     }
     if (this.isExternalFileDrag(event)) {
       event.preventDefault();
+      // Stop this from also reaching the table-wrap's own dragover handler - otherwise, once a drop lands,
+      // both this row's handler and the table-wide "drop into current folder" handler would fire for it.
+      event.stopPropagation();
       return;
     }
     if (!this.dragPaths) {
@@ -852,6 +859,9 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       return;
     }
     if (this.isExternalFileDrag(event)) {
+      // Without this, the drop event bubbles from the row up to the table-wrap's own drop handler, which
+      // would upload the same files a second time into the currently open folder.
+      event.stopPropagation();
       await this.handleExternalDrop(event, entry.path);
       return;
     }

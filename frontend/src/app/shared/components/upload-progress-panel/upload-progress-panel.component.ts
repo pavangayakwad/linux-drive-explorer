@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, computed } from '@angular/core';
 import { ButtonModule } from 'primeng/button';
+import { MessageService } from 'primeng/api';
 import { TooltipModule } from 'primeng/tooltip';
 import { UploadService } from '../../../core/services/upload.service';
 import { UploadItem } from '../../../core/models/upload.model';
@@ -19,7 +20,10 @@ export class UploadProgressPanelComponent {
 
   readonly doneCount = computed(() => this.uploadService.items().filter((i) => i.status === 'done').length);
 
-  constructor(readonly uploadService: UploadService) {}
+  constructor(
+    readonly uploadService: UploadService,
+    private readonly messageService: MessageService,
+  ) {}
 
   headerLabel(): string {
     if (this.uploadService.isActive()) {
@@ -50,6 +54,18 @@ export class UploadProgressPanelComponent {
 
   cancelItem(item: UploadItem): void {
     this.uploadService.cancelItem(item.id);
+  }
+
+  showError(item: UploadItem): void {
+    if (item.status !== 'error') {
+      return;
+    }
+    this.messageService.add({
+      severity: 'error',
+      summary: `Failed to upload "${item.name}"`,
+      detail: item.errorMessage ?? 'Upload failed.',
+      sticky: true,
+    });
   }
 
   cancelAll(): void {

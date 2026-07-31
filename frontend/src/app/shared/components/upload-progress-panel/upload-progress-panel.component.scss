@@ -62,6 +62,14 @@
   }
 }
 
+.upload-panel__item--error {
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(239, 68, 68, 0.08);
+  }
+}
+
 .upload-panel__name {
   flex: 1 1 auto;
   min-width: 0;
