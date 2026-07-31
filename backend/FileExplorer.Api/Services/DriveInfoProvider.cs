@@ -18,6 +18,10 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
     /// ever want to browse (EFI system partitions, Docker's internal overlay2 storage, etc.).</summary>
     private static readonly string[] NoiseMountPathSubstrings = ["/boot/efi", "/var/lib/docker"];
 
+    /// <summary>Exact mount paths that are noise rather than substrings, since substring-matching "/boot" would also
+    /// hide unrelated real mounts that merely contain that text (e.g. "/mnt/reboot-backup").</summary>
+    private static readonly HashSet<string> NoiseMountPaths = new(StringComparer.OrdinalIgnoreCase) { "/boot" };
+
     private static readonly string[] RemovableMountPrefixes = ["/mnt/", "/media/"];
 
     [GeneratedRegex(@"^(sd[a-z]+|vd[a-z]+|xvd[a-z]+|nvme\d+n\d+|mmcblk\d+)")]
@@ -55,6 +59,11 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
             }
 
             if (NoiseMountPathSubstrings.Any(substring => mountFullPath.Contains(substring, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            if (NoiseMountPaths.Contains(mountFullPath))
             {
                 continue;
             }

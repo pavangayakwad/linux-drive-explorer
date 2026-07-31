@@ -6,7 +6,13 @@ namespace FileExplorer.Api.Services;
 
 public class FileSystemService(IPathResolver pathResolver, IOptions<FileSystemOptions> fsOptions) : IFileSystemService
 {
-    private readonly string _trashDirName = fsOptions.Value.TrashDirectoryName;
+    // App-created top-level directories (trash, zip staging) that are implementation detail, never something
+    // a user should see or search into.
+    private readonly HashSet<string> _reservedNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        fsOptions.Value.TrashDirectoryName,
+        fsOptions.Value.ZipDirectoryName,
+    };
 
     public DirectoryListingDto ListDirectory(string virtualPath)
     {
@@ -22,7 +28,7 @@ public class FileSystemService(IPathResolver pathResolver, IOptions<FileSystemOp
         foreach (var entryPath in Directory.EnumerateFileSystemEntries(physicalPath))
         {
             var name = Path.GetFileName(entryPath);
-            if (name.Equals(_trashDirName, StringComparison.OrdinalIgnoreCase))
+            if (_reservedNames.Contains(name))
             {
                 continue;
             }
@@ -80,7 +86,7 @@ public class FileSystemService(IPathResolver pathResolver, IOptions<FileSystemOp
             foreach (var entryPath in entries)
             {
                 var name = Path.GetFileName(entryPath);
-                if (name.Equals(_trashDirName, StringComparison.OrdinalIgnoreCase))
+                if (_reservedNames.Contains(name))
                 {
                     continue;
                 }
@@ -168,6 +174,18 @@ public class FileSystemService(IPathResolver pathResolver, IOptions<FileSystemOp
         }
 
         return DescribeEntry(newPhysicalPath, newName);
+    }
+
+    public FileEntryDto DescribeEntry(string virtualPath)
+    {
+        var physicalPath = pathResolver.ToPhysicalPath(virtualPath);
+        var isDirectory = Directory.Exists(physicalPath);
+        if (!isDirectory && !File.Exists(physicalPath))
+        {
+            throw new FileNotFoundException($"'{virtualPath}' does not exist.");
+        }
+
+        return DescribeEntry(physicalPath, Path.GetFileName(physicalPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)));
     }
 
     private static void ValidateEntryName(string name)

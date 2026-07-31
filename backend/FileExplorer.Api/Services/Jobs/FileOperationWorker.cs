@@ -1,10 +1,13 @@
+using System.IO.Compression;
 using FileExplorer.Api.Data;
 using FileExplorer.Api.Hubs;
 using FileExplorer.Api.Models.Dtos;
 using FileExplorer.Api.Models.Entities;
+using FileExplorer.Api.Options;
 using FileExplorer.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace FileExplorer.Api.Services.Jobs;
 
@@ -57,6 +60,7 @@ public class FileOperationWorker(
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var pathResolver = scope.ServiceProvider.GetRequiredService<IPathResolver>();
         var trashService = scope.ServiceProvider.GetRequiredService<ITrashService>();
+        var fsOptions = scope.ServiceProvider.GetRequiredService<IOptions<FileSystemOptions>>().Value;
 
         var job = await db.FileOperationJobs.FindAsync([jobId], outerCt);
         if (job is null)
@@ -87,6 +91,9 @@ public class FileOperationWorker(
                     break;
                 case FileOperationType.PurgeTrash:
                     ExecutePurge(job, db, trashService, ct);
+                    break;
+                case FileOperationType.Zip:
+                    ExecuteZip(job, db, pathResolver, fsOptions, ct);
                     break;
             }
 
@@ -261,6 +268,121 @@ public class FileOperationWorker(
             {
                 Directory.Delete(trashRoot);
             }
+        }
+    }
+
+    private void ExecuteZip(FileOperationJob job, AppDbContext db, IPathResolver pathResolver, FileSystemOptions fsOptions, CancellationToken ct)
+    {
+        var stagingDir = ZipStaging.GetStagingDirectory(pathResolver, fsOptions);
+        Directory.CreateDirectory(stagingDir);
+        var zipPhysicalPath = ZipStaging.GetZipPhysicalPath(pathResolver, fsOptions, job.Id);
+
+        var plan = new List<(string PhysicalPath, string EntryRootName)>();
+        long totalBytes = 0;
+        var totalItems = 0;
+
+        foreach (var virtualSource in job.GetSourcePaths())
+        {
+            var physicalSource = pathResolver.ToPhysicalPath(virtualSource);
+            var (items, bytes) = FileTreeOperations.Measure(physicalSource);
+            totalItems += items;
+            totalBytes += bytes;
+
+            var name = Path.GetFileName(physicalSource.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            plan.Add((physicalSource, name));
+        }
+
+        job.TotalItems = totalItems;
+        job.TotalBytes = totalBytes;
+        var reportEvery = Math.Max(1, totalItems / 50);
+        var lastReported = 0;
+        var lastReportedAt = DateTime.UtcNow;
+        var reportInterval = TimeSpan.FromMilliseconds(500);
+
+        void Report(bool force)
+        {
+            var now = DateTime.UtcNow;
+            var itemThresholdMet = job.ProcessedItems - lastReported >= reportEvery;
+            if (!force && !itemThresholdMet && now - lastReportedAt < reportInterval)
+            {
+                return;
+            }
+            lastReported = job.ProcessedItems;
+            lastReportedAt = now;
+            db.SaveChangesAsync(ct).GetAwaiter().GetResult();
+            BroadcastAsync(job, ct).GetAwaiter().GetResult();
+        }
+
+        Report(force: true);
+
+        try
+        {
+            using (var zipFileStream = new FileStream(zipPhysicalPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var archive = new ZipArchive(zipFileStream, ZipArchiveMode.Create))
+            {
+                foreach (var (physicalPath, entryRootName) in plan)
+                {
+                    job.CurrentItem = pathResolver.ToVirtualPath(physicalPath);
+                    AddToArchive(archive, physicalPath, entryRootName, job, Report, ct);
+                }
+            }
+            Report(force: true);
+        }
+        catch
+        {
+            TryDeleteFile(zipPhysicalPath);
+            throw;
+        }
+    }
+
+    private static void AddToArchive(ZipArchive archive, string physicalPath, string entryName, FileOperationJob job, Action<bool> report, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (Directory.Exists(physicalPath))
+        {
+            job.ProcessedItems++;
+            report(false);
+            foreach (var child in Directory.EnumerateFileSystemEntries(physicalPath))
+            {
+                AddToArchive(archive, child, $"{entryName}/{Path.GetFileName(child)}", job, report, ct);
+            }
+            return;
+        }
+
+        var entry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+        entry.LastWriteTime = File.GetLastWriteTimeUtc(physicalPath);
+
+        using (var entryStream = entry.Open())
+        using (var source = new FileStream(physicalPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.SequentialScan))
+        {
+            var buffer = new byte[1024 * 1024];
+            int read;
+            while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                entryStream.Write(buffer, 0, read);
+                job.ProcessedBytes += read;
+                report(false);
+            }
+        }
+
+        job.ProcessedItems++;
+        report(false);
+    }
+
+    private static void TryDeleteFile(string physicalPath)
+    {
+        try
+        {
+            if (File.Exists(physicalPath))
+            {
+                File.Delete(physicalPath);
+            }
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup only.
         }
     }
 

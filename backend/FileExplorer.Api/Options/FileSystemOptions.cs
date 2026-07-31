@@ -14,4 +14,10 @@ public class FileSystemOptions
     /// Name of the hidden trash directory created at the top of each mounted drive.
     /// </summary>
     public string TrashDirectoryName { get; set; } = ".filexplorer-trash";
+
+    /// <summary>
+    /// Name of the hidden directory (at the top of the virtual root) used to stage zip archives while a
+    /// multi-file/folder download job builds them.
+    /// </summary>
+    public string ZipDirectoryName { get; set; } = ".filexplorer-zips";
 }

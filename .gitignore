@@ -19,3 +19,8 @@ frontend/.angular/
 
 # Secrets
 .env
+
+website/
+marketing/
+.serena
+**package-lock.json

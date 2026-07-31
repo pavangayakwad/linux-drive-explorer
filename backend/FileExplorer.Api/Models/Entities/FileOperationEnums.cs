@@ -6,6 +6,7 @@ public enum FileOperationType
     Move,
     Delete,
     PurgeTrash,
+    Zip,
 }
 
 public enum FileOperationStatus

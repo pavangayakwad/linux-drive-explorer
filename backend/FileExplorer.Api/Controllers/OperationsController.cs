@@ -34,5 +34,9 @@ public class OperationsController(IFileOperationsService operationsService) : Co
         {
             return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
+        catch (InsufficientSpaceException ex)
+        {
+            return Conflict(new { code = "insufficient_space", message = ex.Message, requiredBytes = ex.RequiredBytes, availableBytes = ex.AvailableBytes });
+        }
     }
 }

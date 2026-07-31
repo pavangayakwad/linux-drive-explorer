@@ -11,4 +11,6 @@ public interface IFileSystemService
     FileEntryDto Rename(string virtualPath, string newName);
 
     IReadOnlyList<FileEntryDto> Search(string rootVirtualPath, string query, int maxResults = 200);
+
+    FileEntryDto DescribeEntry(string virtualPath);
 }

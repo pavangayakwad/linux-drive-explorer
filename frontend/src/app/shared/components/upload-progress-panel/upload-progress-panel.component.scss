@@ -1,0 +1,114 @@
+.upload-panel {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  width: 22rem;
+  max-width: calc(100vw - 2.5rem);
+  background: var(--p-content-background, #1f2937);
+  color: var(--p-text-color, #f3f4f6);
+  border: 1px solid var(--p-content-border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 0.75rem;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  z-index: 1200;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.upload-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0.5rem 0.75rem 1rem;
+  font-weight: 600;
+}
+
+.upload-panel__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.upload-panel__status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  color: var(--p-text-muted-color, #9ca3af);
+  border-top: 1px solid var(--p-content-border-color, rgba(255, 255, 255, 0.08));
+}
+
+.upload-panel__cancel-all {
+  color: var(--p-primary-color, #60a5fa);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.upload-panel__list {
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+.upload-panel__item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 1rem;
+  border-top: 1px solid var(--p-content-border-color, rgba(255, 255, 255, 0.06));
+
+  &:hover .upload-panel__item-cancel {
+    visibility: visible;
+  }
+}
+
+.upload-panel__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
+.upload-panel__status-icon {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+.upload-panel__icon--pending {
+  color: var(--p-text-muted-color, #6b7280);
+}
+
+.upload-panel__icon--uploading {
+  color: var(--p-primary-color, #60a5fa);
+}
+
+.upload-panel__icon--done {
+  color: #22c55e;
+}
+
+.upload-panel__icon--error {
+  color: #ef4444;
+}
+
+.upload-panel__icon--cancelled {
+  color: var(--p-text-muted-color, #6b7280);
+}
+
+.upload-panel__item-cancel {
+  visibility: hidden;
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--p-text-muted-color, #9ca3af);
+  cursor: pointer;
+  padding: 0.15rem;
+  display: flex;
+  align-items: center;
+
+  &:hover {
+    color: var(--p-text-color, #f3f4f6);
+  }
+}

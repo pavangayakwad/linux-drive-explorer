@@ -1,0 +1,62 @@
+@if (uploadService.visible()) {
+  <div class="upload-panel">
+    <div class="upload-panel__header">
+      <span class="upload-panel__title">{{ headerLabel() }}</span>
+      <div class="upload-panel__header-actions">
+        <p-button
+          [icon]="uploadService.collapsed() ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
+          [text]="true"
+          [rounded]="true"
+          size="small"
+          (onClick)="toggleCollapsed()"
+          pTooltip="{{ uploadService.collapsed() ? 'Expand' : 'Collapse' }}"
+        />
+        <p-button icon="pi pi-times" [text]="true" [rounded]="true" size="small" (onClick)="close()" pTooltip="Close" />
+      </div>
+    </div>
+
+    @if (!uploadService.collapsed()) {
+      <div class="upload-panel__status">
+        <span>{{ uploadService.isActive() ? uploadService.remainingLabel() : 'All uploads finished' }}</span>
+        @if (uploadService.isActive()) {
+          <a class="upload-panel__cancel-all" (click)="cancelAll()">Cancel</a>
+        }
+      </div>
+
+      <div class="upload-panel__list">
+        @for (item of uploadService.items(); track item.id) {
+          <div class="upload-panel__item">
+            <i [class]="itemIcon(item)"></i>
+            <span class="upload-panel__name" [pTooltip]="item.errorMessage ?? item.relativePath">{{ item.name }}</span>
+
+            <span class="upload-panel__status-icon">
+              @switch (item.status) {
+                @case ('pending') {
+                  <i class="pi pi-circle upload-panel__icon--pending"></i>
+                }
+                @case ('uploading') {
+                  <i class="pi pi-spin pi-spinner upload-panel__icon--uploading" [pTooltip]="itemPercent(item) + '%'"></i>
+                }
+                @case ('done') {
+                  <i class="pi pi-check-circle upload-panel__icon--done"></i>
+                }
+                @case ('error') {
+                  <i class="pi pi-exclamation-circle upload-panel__icon--error" [pTooltip]="item.errorMessage ?? 'Upload failed'"></i>
+                }
+                @case ('cancelled') {
+                  <i class="pi pi-ban upload-panel__icon--cancelled"></i>
+                }
+              }
+            </span>
+
+            @if (canCancel(item)) {
+              <button type="button" class="upload-panel__item-cancel" (click)="cancelItem(item)" title="Cancel">
+                <i class="pi pi-times"></i>
+              </button>
+            }
+          </div>
+        }
+      </div>
+    }
+  </div>
+}

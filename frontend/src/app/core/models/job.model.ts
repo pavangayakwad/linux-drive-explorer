@@ -1,4 +1,4 @@
-export type FileOperationType = 'Copy' | 'Move' | 'Delete' | 'PurgeTrash';
+export type FileOperationType = 'Copy' | 'Move' | 'Delete' | 'PurgeTrash' | 'Zip';
 
 export type FileOperationStatus = 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled';
 

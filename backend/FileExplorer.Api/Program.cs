@@ -103,6 +103,17 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
     await DbSeeder.SeedAdminAsync(db, scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<AdminSeedOptions>>().Value, app.Logger);
+
+    // Wipe any zip archives staged before this restart - the FileOperationJob rows tracking them are
+    // requeued/failed by FileOperationWorker's own startup sweep, so a completed-but-undownloaded zip from
+    // before the restart would otherwise linger on disk forever with no job left pointing at it.
+    var zipPathResolver = scope.ServiceProvider.GetRequiredService<IPathResolver>();
+    var zipFsOptions = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<FileSystemOptions>>().Value;
+    var zipStagingDir = ZipStaging.GetStagingDirectory(zipPathResolver, zipFsOptions);
+    if (Directory.Exists(zipStagingDir))
+    {
+        Directory.Delete(zipStagingDir, recursive: true);
+    }
 }
 
 if (app.Environment.IsDevelopment())

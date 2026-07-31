@@ -12,6 +12,7 @@ import { Job } from '../../core/models/job.model';
 import { tokenStore } from '../../core/http/token-store';
 import { TasksService } from '../../core/services/tasks.service';
 import { SidebarComponent } from '../../shared/components/sidebar/sidebar.component';
+import { UploadProgressPanelComponent } from '../../shared/components/upload-progress-panel/upload-progress-panel.component';
 
 const ACTIVE_JOB_STATUSES: ReadonlySet<Job['status']> = new Set(['Queued', 'Running']);
 
@@ -33,7 +34,7 @@ function sortDrivesByFreeSpace(drives: DriveSummary[]): DriveSummary[] {
 @Component({
   selector: 'app-shell',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, SidebarComponent],
+  imports: [CommonModule, RouterOutlet, SidebarComponent, UploadProgressPanelComponent],
   templateUrl: './shell.component.html',
   styleUrl: './shell.component.scss',
 })

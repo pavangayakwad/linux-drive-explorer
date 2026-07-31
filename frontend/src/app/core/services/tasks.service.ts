@@ -3,6 +3,7 @@ import * as signalR from '@microsoft/signalr';
 import { apiClient } from '../http/api-client';
 import { tokenStore } from '../http/token-store';
 import { Job } from '../models/job.model';
+import { downloadBlob } from '../../shared/download.util';
 
 @Injectable({ providedIn: 'root' })
 export class TasksService {
@@ -15,6 +16,10 @@ export class TasksService {
 
   async cancel(jobId: string): Promise<void> {
     await apiClient.post(`/tasks/${jobId}/cancel`);
+  }
+
+  async downloadZip(jobId: string): Promise<void> {
+    await downloadBlob(`/files/download-zip/${jobId}`, {}, 'Archive.zip');
   }
 
   async clearFinished(): Promise<void> {

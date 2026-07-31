@@ -117,7 +117,11 @@ public class DirectorySizeService(IPathResolver pathResolver, ILogger<DirectoryS
             StartInfo = new ProcessStartInfo
             {
                 FileName = "du",
-                ArgumentList = { "-sb", "--", state.PhysicalPath },
+                // -x (--one-file-system) keeps the scan on the folder's own filesystem - without it, a directory
+                // like a Docker data root can pull in dozens of nested overlay/bind/tmpfs mounts for running
+                // containers, which on a slower machine can make the scan take a very long time (or effectively
+                // never finish) computing sizes for filesystems that aren't really part of this folder anyway.
+                ArgumentList = { "-sbx", "--", state.PhysicalPath },
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,

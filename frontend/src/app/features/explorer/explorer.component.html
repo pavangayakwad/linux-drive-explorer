@@ -37,7 +37,15 @@
     <p-button icon="pi pi-clipboard" [text]="true" [disabled]="!clipboard()" (onClick)="paste()" pTooltip="Paste" />
     <p-button icon="pi pi-pencil" [text]="true" [disabled]="selection().length !== 1" (onClick)="openRename()" pTooltip="Rename" />
     <p-button icon="pi pi-trash" [text]="true" severity="danger" [disabled]="selection().length === 0" (onClick)="confirmDelete()" pTooltip="Delete" />
+    <p-button icon="pi pi-download" [text]="true" [disabled]="selection().length === 0" (onClick)="download()" pTooltip="Download" />
     <p-button icon="pi pi-info-circle" [text]="true" [disabled]="selection().length === 0" (onClick)="openProperties()" pTooltip="Properties" />
+
+    <span class="explorer__divider"></span>
+
+    <p-button icon="pi pi-upload" [text]="true" (onClick)="openUploadFilesPicker()" pTooltip="Upload files" />
+    <p-button icon="pi pi-cloud-upload" [text]="true" (onClick)="openUploadFolderPicker()" pTooltip="Upload folder" />
+    <input #fileInput type="file" multiple hidden (change)="onFileInputChange($event)" />
+    <input #folderInput type="file" webkitdirectory multiple hidden (change)="onFolderInputChange($event)" />
 
     <span class="explorer__divider"></span>
 
@@ -63,7 +71,13 @@
     <div class="explorer__error">{{ errorMessage() }}</div>
   }
 
-  <div class="explorer__table-wrap" (contextmenu)="onEmptyContextMenu($event)" (mousedown)="onTableMouseDown($event)">
+  <div
+    class="explorer__table-wrap"
+    (contextmenu)="onEmptyContextMenu($event)"
+    (mousedown)="onTableMouseDown($event)"
+    (dragover)="onTableDragOver($event)"
+    (drop)="onTableDrop($event)"
+  >
     <p-table
       class="explorer__table"
       [value]="displayRows()"

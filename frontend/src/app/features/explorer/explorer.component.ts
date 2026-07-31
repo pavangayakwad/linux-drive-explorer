@@ -26,8 +26,11 @@ import { OperationsService } from '../../core/services/operations.service';
 import { SearchService } from '../../core/services/search.service';
 import { DriveNavigationStateService } from '../../core/services/drive-navigation-state.service';
 import { TrashService } from '../../core/services/trash.service';
+import { UploadService } from '../../core/services/upload.service';
 import { DirectoryListing, FileEntry } from '../../core/models/file-system.model';
 import { fileIconClass, formatBytes, formatDateTime, pathSegments } from '../../shared/format.util';
+import { downloadBlob, getInsufficientSpaceInfo } from '../../shared/download.util';
+import { collectFilesFromDataTransfer, collectFilesFromFileList } from '../../shared/dropped-entries.util';
 import { PropertiesDialogComponent } from './components/properties-dialog/properties-dialog.component';
 import { PreviewDialogComponent } from './components/preview-dialog/preview-dialog.component';
 import { DirectorySizeTracker, FolderSizeState } from '../../shared/directory-size-tracker';
@@ -105,6 +108,8 @@ function saveSortPreference(preference: SortPreference): void {
 export class ExplorerComponent implements OnInit, OnDestroy {
   @ViewChild('rowMenu') rowMenu!: ContextMenu;
   @ViewChild('searchInput') searchInputRef?: ElementRef<HTMLInputElement>;
+  @ViewChild('fileInput') fileInputRef?: ElementRef<HTMLInputElement>;
+  @ViewChild('folderInput') folderInputRef?: ElementRef<HTMLInputElement>;
 
   readonly listing = signal<DirectoryListing | null>(null);
   readonly loading = signal(false);
@@ -197,6 +202,7 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     private readonly operationsService: OperationsService,
     private readonly searchService: SearchService,
     private readonly trashService: TrashService,
+    private readonly uploadService: UploadService,
     private readonly driveNavState: DriveNavigationStateService,
     private readonly confirmationService: ConfirmationService,
     private readonly messageService: MessageService,
@@ -644,6 +650,7 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       { separator: true },
       { label: 'Cut', icon: 'pi pi-arrows-alt', command: () => this.cutSelection() },
       { label: 'Copy', icon: 'pi pi-copy', command: () => this.copySelection() },
+      { label: 'Download', icon: 'pi pi-download', command: () => void this.download() },
       { separator: true },
       { label: 'Rename', icon: 'pi pi-pencil', disabled: selected.length !== 1, command: () => this.openRename() },
       { label: 'Delete', icon: 'pi pi-trash', command: () => this.confirmDelete() },
@@ -659,6 +666,9 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       { label: 'New file', icon: 'pi pi-file-plus', command: () => this.openNewFile() },
       { separator: true },
       { label: 'Paste', icon: 'pi pi-clipboard', disabled: !this.clipboard(), command: () => void this.paste() },
+      { separator: true },
+      { label: 'Upload files', icon: 'pi pi-upload', command: () => this.openUploadFilesPicker() },
+      { label: 'Upload folder', icon: 'pi pi-cloud-upload', command: () => this.openUploadFolderPicker() },
     ];
   }
 
@@ -819,7 +829,14 @@ export class ExplorerComponent implements OnInit, OnDestroy {
   }
 
   onRowDragOver(event: DragEvent, entry: FileEntryRow): void {
-    if (!entry.isDirectory || !this.dragPaths) {
+    if (!entry.isDirectory) {
+      return;
+    }
+    if (this.isExternalFileDrag(event)) {
+      event.preventDefault();
+      return;
+    }
+    if (!this.dragPaths) {
       return;
     }
     event.preventDefault();
@@ -830,9 +847,18 @@ export class ExplorerComponent implements OnInit, OnDestroy {
 
   async onRowDrop(event: DragEvent, entry: FileEntryRow): Promise<void> {
     event.preventDefault();
+    if (!entry.isDirectory) {
+      this.dragPaths = null;
+      return;
+    }
+    if (this.isExternalFileDrag(event)) {
+      await this.handleExternalDrop(event, entry.path);
+      return;
+    }
+
     const dragPaths = this.dragPaths;
     this.dragPaths = null;
-    if (!entry.isDirectory || !dragPaths) {
+    if (!dragPaths) {
       return;
     }
     const paths = dragPaths.filter((p) => p !== entry.path);
@@ -847,6 +873,104 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       detail: 'Started in background - see Tasks for progress.',
     });
     setTimeout(() => this.refresh(), 600);
+  }
+
+  // ---- Upload ----
+
+  private isExternalFileDrag(event: DragEvent): boolean {
+    return !this.dragPaths && !!event.dataTransfer?.types.includes('Files');
+  }
+
+  onTableDragOver(event: DragEvent): void {
+    if (this.isExternalFileDrag(event)) {
+      event.preventDefault();
+    }
+  }
+
+  async onTableDrop(event: DragEvent): Promise<void> {
+    if (!this.isExternalFileDrag(event)) {
+      return;
+    }
+    event.preventDefault();
+    await this.handleExternalDrop(event, this.listing()?.path ?? '/');
+  }
+
+  private async handleExternalDrop(event: DragEvent, destinationPath: string): Promise<void> {
+    if (!event.dataTransfer) {
+      return;
+    }
+    const entries = await collectFilesFromDataTransfer(event.dataTransfer);
+    await this.startUpload(entries, destinationPath);
+  }
+
+  openUploadFilesPicker(): void {
+    this.fileInputRef?.nativeElement.click();
+  }
+
+  openUploadFolderPicker(): void {
+    this.folderInputRef?.nativeElement.click();
+  }
+
+  async onFileInputChange(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    if (input.files?.length) {
+      await this.startUpload(collectFilesFromFileList(input.files), this.listing()?.path ?? '/');
+    }
+    input.value = '';
+  }
+
+  async onFolderInputChange(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    if (input.files?.length) {
+      await this.startUpload(collectFilesFromFileList(input.files), this.listing()?.path ?? '/');
+    }
+    input.value = '';
+  }
+
+  private async startUpload(entries: { file: File; relativePath: string }[], destinationPath: string): Promise<void> {
+    if (entries.length === 0) {
+      return;
+    }
+    await this.uploadService.startUpload(entries, destinationPath);
+    if (destinationPath === (this.listing()?.path ?? '/')) {
+      this.refresh();
+    }
+  }
+
+  // ---- Download ----
+
+  async download(): Promise<void> {
+    const selected = this.selection();
+    if (selected.length === 0) {
+      return;
+    }
+
+    if (selected.length === 1 && !selected[0].isDirectory) {
+      await downloadBlob('/files/download', { path: selected[0].path }, selected[0].name);
+      return;
+    }
+
+    try {
+      const paths = selected.map((entry) => entry.path);
+      await this.operationsService.create('Zip', paths);
+      this.messageService.add({
+        severity: 'info',
+        summary: 'Preparing download',
+        detail: 'Zipping - see Tasks for progress and to download when ready.',
+      });
+    } catch (error) {
+      const spaceInfo = getInsufficientSpaceInfo(error);
+      if (spaceInfo) {
+        this.messageService.add({
+          severity: 'error',
+          summary: 'Not enough space to build the zip',
+          detail: `This needs about ${formatBytes(spaceInfo.requiredBytes)} but only ${formatBytes(spaceInfo.availableBytes)} is free. Free up some space, or download the items one at a time instead.`,
+          sticky: true,
+        });
+      } else {
+        this.messageService.add({ severity: 'error', summary: 'Failed', detail: 'Could not start the download.' });
+      }
+    }
   }
 
   // ---- Create / rename ----
@@ -949,6 +1073,10 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     this.selection.set(this.selection().filter((entry) => !deleted.has(entry.path)));
     if (this.searchMode()) {
       this.searchResults.set(this.searchResults().filter((entry) => !deleted.has(entry.path)));
+    }
+    const current = this.listing();
+    if (current) {
+      this.listing.set({ ...current, entries: current.entries.filter((entry) => !deleted.has(entry.path)) });
     }
     setTimeout(() => this.refresh(), 600);
   }

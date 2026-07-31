@@ -1,17 +1,24 @@
 using FileExplorer.Api.Data;
 using FileExplorer.Api.Models.Dtos;
 using FileExplorer.Api.Models.Entities;
+using FileExplorer.Api.Options;
+using FileExplorer.Api.Services;
 using FileExplorer.Api.Services.Jobs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace FileExplorer.Api.Controllers;
 
 [Authorize]
 [ApiController]
 [Route("api/tasks")]
-public class TasksController(AppDbContext db, JobCancellationRegistry cancellationRegistry) : ControllerBase
+public class TasksController(
+    AppDbContext db,
+    JobCancellationRegistry cancellationRegistry,
+    IPathResolver pathResolver,
+    IOptions<FileSystemOptions> fsOptions) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<JobDto>>> List(CancellationToken ct)
@@ -36,9 +43,30 @@ public class TasksController(AppDbContext db, JobCancellationRegistry cancellati
     {
         var finishedStatuses = new[] { FileOperationStatus.Completed, FileOperationStatus.Cancelled, FileOperationStatus.Failed };
         var finished = await db.FileOperationJobs.Where(j => finishedStatuses.Contains(j.Status)).ToListAsync(ct);
+
+        foreach (var job in finished.Where(j => j.Type == FileOperationType.Zip))
+        {
+            TryDeleteFile(ZipStaging.GetZipPhysicalPath(pathResolver, fsOptions.Value, job.Id));
+        }
+
         db.FileOperationJobs.RemoveRange(finished);
         await db.SaveChangesAsync(ct);
 
         return NoContent();
+    }
+
+    private static void TryDeleteFile(string physicalPath)
+    {
+        try
+        {
+            if (System.IO.File.Exists(physicalPath))
+            {
+                System.IO.File.Delete(physicalPath);
+            }
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup only.
+        }
     }
 }
