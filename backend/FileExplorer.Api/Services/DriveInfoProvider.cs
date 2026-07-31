@@ -63,11 +63,6 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
                 continue;
             }
 
-            if (NoiseMountPaths.Contains(mountFullPath))
-            {
-                continue;
-            }
-
             string virtualPath;
             try
             {
@@ -76,6 +71,14 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
             catch (UnauthorizedAccessException)
             {
                 // Mount point is outside the configured root - not reachable through the API, skip it.
+                continue;
+            }
+
+            // Compared against the virtual (root-relative) path, not the raw physical mount path: when the
+            // configured root is a bind-mounted prefix like /host_root, the physical path is /host_root/boot,
+            // which would never equal the exact string "/boot".
+            if (NoiseMountPaths.Contains(virtualPath))
+            {
                 continue;
             }
 
