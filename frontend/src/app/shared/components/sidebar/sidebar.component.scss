@@ -6,7 +6,7 @@
   height: 100%;
   overflow-y: auto;
   border-right: 1px solid var(--p-content-border-color, #e5e7eb);
-  background: var(--p-surface-50, #fafafa);
+  background: var(--p-content-background, #fafafa);
 }
 
 .sidebar__brand {
@@ -57,7 +57,7 @@
   color: inherit;
 
   &:hover:not(:disabled) {
-    background: var(--p-surface-100, #f0f0f0);
+    background: var(--p-content-hover-background, #f0f0f0);
   }
 
   &:disabled {
@@ -103,11 +103,11 @@
   color: inherit;
 
   &:hover {
-    background: var(--p-surface-100, #f0f0f0);
+    background: var(--p-content-hover-background, #f0f0f0);
   }
 
   &--active {
-    background: var(--p-primary-50, #eef2ff);
+    background: var(--p-highlight-background, #eef2ff);
     color: var(--p-primary-color, #6366f1);
     font-weight: 600;
     border-color: var(--p-primary-color, #6366f1);
@@ -135,7 +135,7 @@
 .sidebar__usage-bar {
   height: 4px;
   border-radius: 2px;
-  background: var(--p-surface-200, #e5e7eb);
+  background: var(--p-content-border-color, #e5e7eb);
   overflow: hidden;
 }
 

@@ -5,7 +5,7 @@ import { MenuItem } from 'primeng/api';
 import { MenuModule } from 'primeng/menu';
 import { TooltipModule } from 'primeng/tooltip';
 import { AuthService } from '../../../core/services/auth.service';
-import { ThemeService, THEME_COLORS } from '../../../core/services/theme.service';
+import { ThemeService, THEME_COLORS, THEME_MODES, ThemeMode } from '../../../core/services/theme.service';
 import { ThemeColor } from '../../../core/models/auth.model';
 import { DriveSummary } from '../../../core/models/file-system.model';
 import { DriveNavigationStateService } from '../../../core/services/drive-navigation-state.service';
@@ -16,6 +16,16 @@ const THEME_COLOR_LABELS: Record<ThemeColor, string> = {
   green: 'Green',
   blue: 'Blue',
   violet: 'Violet',
+};
+
+const THEME_MODE_LABELS: Record<ThemeMode, string> = {
+  light: 'Light',
+  dark: 'Dark',
+};
+
+const THEME_MODE_ICONS: Record<ThemeMode, string> = {
+  light: 'pi pi-sun',
+  dark: 'pi pi-moon',
 };
 
 @Component({
@@ -50,6 +60,13 @@ export class SidebarComponent {
       icon: this.themeService.current() === color ? 'pi pi-check' : 'pi pi-circle-fill',
       styleClass: `sidebar__theme-item sidebar__theme-item--${color}`,
       command: () => void this.themeService.select(color),
+    })),
+    { separator: true },
+    { label: 'Appearance', disabled: true },
+    ...THEME_MODES.map((mode) => ({
+      label: THEME_MODE_LABELS[mode],
+      icon: this.themeService.mode() === mode ? 'pi pi-check' : THEME_MODE_ICONS[mode],
+      command: () => this.themeService.applyMode(mode),
     })),
     { separator: true },
     { label: 'Sign out', icon: 'pi pi-sign-out', command: () => this.logout() },

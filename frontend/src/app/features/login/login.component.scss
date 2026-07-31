@@ -3,7 +3,7 @@
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: var(--p-surface-100, #f4f5f7);
+  background: var(--p-content-hover-background, #f4f5f7);
 }
 
 .login-card {
@@ -13,7 +13,7 @@
   width: 22rem;
   padding: 2rem;
   border-radius: 12px;
-  background: var(--p-surface-0, #fff);
+  background: var(--p-content-background, #fff);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
 
   &__icon {

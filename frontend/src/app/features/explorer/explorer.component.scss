@@ -54,7 +54,7 @@
     color: var(--p-primary-color, #6366f1);
 
     &:hover {
-      background: var(--p-surface-100, #f0f0f0);
+      background: var(--p-content-hover-background, #f0f0f0);
     }
   }
 
@@ -184,11 +184,11 @@
   }
 
   .p-datatable-table > .p-datatable-tbody > tr:hover {
-    background: var(--p-surface-100, #f3f4f6);
+    background: var(--p-content-hover-background, #f3f4f6);
   }
 
   .p-datatable-table > .p-datatable-tbody > tr.p-datatable-row-selected {
-    background: var(--p-primary-50, #e5edff) !important;
+    background: var(--p-highlight-background, #e5edff) !important;
   }
 
   .p-datatable-table > .p-datatable-tbody > tr.explorer__focused-row {
