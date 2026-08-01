@@ -164,6 +164,9 @@ export class ExplorerComponent implements OnInit, OnDestroy {
   private searchDebounceHandle: ReturnType<typeof setTimeout> | null = null;
   private static readonly RUBBER_BAND_THRESHOLD = 4;
   private static readonly SEARCH_DEBOUNCE_MS = 250;
+  // Set once the user drags the Name column's resize handle - from then on measureColumnWidths
+  // uses this instead of the leftover-space calculation, so the manual size sticks across folders.
+  private nameWidthOverride: number | null = null;
 
   readonly rows = computed<FileEntryRow[]>(() => this.listing()?.entries ?? []);
 
@@ -399,9 +402,37 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     // PrimeNG renders around the table (.p-datatable-table-container), which is sized by ordinary
     // flex layout rather than the table's own fixed column algorithm.
     const containerWidth = table.parentElement?.clientWidth ?? table.clientWidth;
-    const name = Math.max(MIN_NAME_COLUMN_WIDTH, containerWidth - size - type - createdAt - modifiedAt);
+    const name =
+      this.nameWidthOverride != null
+        ? Math.max(MIN_NAME_COLUMN_WIDTH, this.nameWidthOverride)
+        : Math.max(MIN_NAME_COLUMN_WIDTH, containerWidth - size - type - createdAt - modifiedAt);
 
     this.columnWidths.set({ name, size, type, createdAt, modifiedAt });
+  }
+
+  // Drag-to-resize for the Name column header. Other columns stay auto-measured from their content
+  // (see measureColumnWidths); Name is the one column wide enough, and free-form enough in content,
+  // to be worth letting the user size by hand.
+  onNameColumnResizeStart(event: MouseEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+    const startWidth = this.columnWidths().name;
+
+    const onMouseMove = (moveEvent: MouseEvent): void => {
+      const width = Math.max(MIN_NAME_COLUMN_WIDTH, startWidth + (moveEvent.clientX - startX));
+      this.nameWidthOverride = width;
+      this.columnWidths.update((widths) => ({ ...widths, name: width }));
+    };
+
+    const onMouseUp = (): void => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
   }
 
   // ---- Keyboard navigation ----
