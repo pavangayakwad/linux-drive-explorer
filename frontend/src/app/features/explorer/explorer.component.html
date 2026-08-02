@@ -169,7 +169,7 @@
 <app-preview-dialog [visible]="previewVisible()" [entry]="previewEntry()" (visibleChange)="previewVisible.set($event)" />
 
 @if (promptDialog(); as prompt) {
-  <p-dialog [header]="prompt.title" [visible]="true" [modal]="true" [style]="{ width: '22rem' }" (onHide)="cancelPrompt()">
+  <p-dialog [header]="prompt.title" [visible]="true" [modal]="true" [style]="{ width: '22rem' }" (visibleChange)="cancelPrompt()" (onHide)="cancelPrompt()">
     <form (ngSubmit)="confirmPrompt()">
       <label for="promptValue">{{ prompt.label }}</label>
       <input id="promptValue" type="text" pInputText [(ngModel)]="promptValue" name="promptValue" autofocus style="width: 100%; margin-top: 0.4rem" />
