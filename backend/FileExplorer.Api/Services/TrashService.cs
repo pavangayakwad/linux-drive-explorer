@@ -74,6 +74,20 @@ public class TrashService(IPathResolver pathResolver, IMountLocator mountLocator
         };
     }
 
+    public TrashOutcome DeleteForever(string virtualOriginalPath)
+    {
+        var physicalSource = pathResolver.ToPhysicalPath(virtualOriginalPath);
+        var isDirectory = Directory.Exists(physicalSource);
+        if (!isDirectory && !File.Exists(physicalSource))
+        {
+            throw new FileNotFoundException($"'{virtualOriginalPath}' does not exist.");
+        }
+
+        var name = Path.GetFileName(physicalSource.TrimEnd(Path.DirectorySeparatorChar));
+        FileTreeOperations.DeleteRecursive(physicalSource, () => { }, CancellationToken.None);
+        return new TrashOutcome { Name = name, PermanentlyDeleted = true };
+    }
+
     public bool HasSpaceForAll(IReadOnlyList<string> virtualPaths)
     {
         var bytesByMount = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);

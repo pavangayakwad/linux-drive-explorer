@@ -23,7 +23,7 @@ public class OperationsController(IFileOperationsService operationsService) : Co
         try
         {
             var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var jobId = await operationsService.CreateJobAsync(request.Type, request.Sources, request.Destination, userId, ct);
+            var jobId = await operationsService.CreateJobAsync(request.Type, request.Sources, request.Destination, userId, request.Permanent, ct);
             return Accepted(new { jobId });
         }
         catch (ArgumentException ex)

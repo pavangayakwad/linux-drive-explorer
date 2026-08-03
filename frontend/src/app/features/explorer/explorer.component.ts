@@ -15,6 +15,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { ConfirmationService, MenuItem, MessageService } from 'primeng/api';
+import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { ContextMenuModule } from 'primeng/contextmenu';
 import { ContextMenu } from 'primeng/contextmenu';
 import { DialogModule } from 'primeng/dialog';
@@ -100,6 +101,7 @@ function saveSortPreference(preference: SortPreference): void {
     TableModule,
     ButtonModule,
     TooltipModule,
+    ConfirmDialogModule,
     ContextMenuModule,
     DialogModule,
     InputTextModule,
@@ -122,6 +124,9 @@ export class ExplorerComponent implements OnInit, OnDestroy {
   readonly focusedPath = signal<string | null>(null);
   readonly clipboard = signal<ClipboardState | null>(null);
   readonly promptDialog = signal<PromptState | null>(null);
+  // Paths staged by confirmDelete() so the delete dialog's "Delete Permanently" footer button
+  // (which bypasses the ConfirmationService accept/reject flow) knows what to delete.
+  readonly pendingDeletePaths = signal<string[]>([]);
   readonly propertiesVisible = signal(false);
   readonly propertiesEntries = signal<FileEntry[]>([]);
   readonly previewVisible = signal(false);
@@ -1090,13 +1095,23 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     if (paths.length === 0) {
       return;
     }
+    this.pendingDeletePaths.set(paths);
     this.confirmationService.confirm({
+      key: 'delete',
       header: 'Delete',
       message: `Move ${paths.length} item(s) to the Trash?`,
       icon: 'pi pi-exclamation-triangle',
       acceptButtonProps: { severity: 'danger', label: 'Delete' },
       accept: () => void this.handleDeleteConfirmed(paths),
     });
+  }
+
+  deletePermanentlyFromDialog(): void {
+    const paths = this.pendingDeletePaths();
+    if (paths.length === 0) {
+      return;
+    }
+    void this.deleteSelection(paths, true);
   }
 
   private async handleDeleteConfirmed(paths: string[]): Promise<void> {
@@ -1124,7 +1139,7 @@ export class ExplorerComponent implements OnInit, OnDestroy {
   }
 
   private async deleteSelection(paths: string[], permanent: boolean): Promise<void> {
-    await this.operationsService.create('Delete', paths);
+    await this.operationsService.create('Delete', paths, undefined, permanent);
     this.messageService.add({
       severity: 'info',
       summary: 'Deleting',

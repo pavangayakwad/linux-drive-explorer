@@ -10,6 +10,9 @@ public class FileOperationJob
     public string? DestinationPath { get; set; }
     public FileOperationStatus Status { get; set; } = FileOperationStatus.Queued;
 
+    /// <summary>When true (Delete jobs only), items are deleted outright instead of moved to Trash.</summary>
+    public bool Permanent { get; set; }
+
     public int TotalItems { get; set; }
     public int ProcessedItems { get; set; }
     public long TotalBytes { get; set; }

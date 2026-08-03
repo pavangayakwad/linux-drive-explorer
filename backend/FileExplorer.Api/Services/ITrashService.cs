@@ -22,6 +22,9 @@ public interface ITrashService
     /// </summary>
     TrashOutcome MoveToTrash(string virtualOriginalPath, int userId);
 
+    /// <summary>Deletes the item at the given virtual path outright, bypassing Trash entirely.</summary>
+    TrashOutcome DeleteForever(string virtualOriginalPath);
+
     /// <summary>
     /// Checks whether every mount involved has enough free space to hold trashed copies of all the given
     /// items at once (items are grouped and summed per mount, since trashing doesn't free any space up as

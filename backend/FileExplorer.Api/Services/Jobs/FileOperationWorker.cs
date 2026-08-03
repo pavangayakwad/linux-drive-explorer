@@ -207,7 +207,9 @@ public class FileOperationWorker(
         {
             ct.ThrowIfCancellationRequested();
             job.CurrentItem = virtualSource;
-            var outcome = trashService.MoveToTrash(virtualSource, job.CreatedByUserId);
+            var outcome = job.Permanent
+                ? trashService.DeleteForever(virtualSource)
+                : trashService.MoveToTrash(virtualSource, job.CreatedByUserId);
             if (outcome.PermanentlyDeleted)
             {
                 job.AddPermanentlyDeletedName(outcome.Name);

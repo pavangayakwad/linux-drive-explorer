@@ -168,6 +168,14 @@
 
 <app-preview-dialog [visible]="previewVisible()" [entry]="previewEntry()" (visibleChange)="previewVisible.set($event)" />
 
+<p-confirmDialog key="delete" #deleteConfirmDialog>
+  <ng-template pTemplate="footer">
+    <p-button label="Cancel" [text]="true" (onClick)="deleteConfirmDialog.onReject()" />
+    <p-button label="Delete Permanently" severity="danger" [outlined]="true" (onClick)="deletePermanentlyFromDialog(); deleteConfirmDialog.hide()" />
+    <p-button label="Delete" severity="danger" (onClick)="deleteConfirmDialog.onAccept()" />
+  </ng-template>
+</p-confirmDialog>
+
 @if (promptDialog(); as prompt) {
   <p-dialog [header]="prompt.title" [visible]="true" [modal]="true" [style]="{ width: '22rem' }" (visibleChange)="cancelPrompt()" (onHide)="cancelPrompt()">
     <form (ngSubmit)="confirmPrompt()">

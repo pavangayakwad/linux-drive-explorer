@@ -10,5 +10,6 @@ public interface IFileOperationsService
         IReadOnlyList<string> sources,
         string? destination,
         int userId,
+        bool permanent = false,
         CancellationToken ct = default);
 }

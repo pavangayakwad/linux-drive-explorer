@@ -2,7 +2,7 @@ using FileExplorer.Api.Models.Entities;
 
 namespace FileExplorer.Api.Models.Dtos;
 
-public record CreateOperationRequest(FileOperationType Type, IReadOnlyList<string> Sources, string? Destination);
+public record CreateOperationRequest(FileOperationType Type, IReadOnlyList<string> Sources, string? Destination, bool Permanent = false);
 
 public record JobDto(
     Guid Id,

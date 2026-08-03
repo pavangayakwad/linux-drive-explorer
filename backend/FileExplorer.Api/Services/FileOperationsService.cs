@@ -22,6 +22,7 @@ public class FileOperationsService(
         IReadOnlyList<string> sources,
         string? destination,
         int userId,
+        bool permanent = false,
         CancellationToken ct = default)
     {
         if (type == FileOperationType.PurgeTrash)
@@ -62,6 +63,7 @@ public class FileOperationsService(
             Type = type,
             DestinationPath = destination,
             CreatedByUserId = userId,
+            Permanent = permanent && type == FileOperationType.Delete,
         };
         job.SetSourcePaths(sources);
 
