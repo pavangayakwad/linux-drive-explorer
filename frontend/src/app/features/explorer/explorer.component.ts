@@ -1146,13 +1146,17 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       detail: permanent ? 'Permanently deleting - see Tasks for progress.' : 'Moved to Trash - see Tasks for progress.',
     });
     const deleted = new Set(paths);
-    this.selection.set(this.selection().filter((entry) => !deleted.has(entry.path)));
+    // Deleting a folder also deletes everything under it, so search results (which can span
+    // subfolders) need descendants of a deleted path removed too, not just exact path matches.
+    const isDeletedOrDescendant = (entryPath: string): boolean =>
+      deleted.has(entryPath) || paths.some((p) => entryPath.startsWith(p.endsWith('/') ? p : `${p}/`));
+    this.selection.set(this.selection().filter((entry) => !isDeletedOrDescendant(entry.path)));
     if (this.searchMode()) {
-      this.searchResults.set(this.searchResults().filter((entry) => !deleted.has(entry.path)));
+      this.searchResults.set(this.searchResults().filter((entry) => !isDeletedOrDescendant(entry.path)));
     }
     const current = this.listing();
     if (current) {
-      this.listing.set({ ...current, entries: current.entries.filter((entry) => !deleted.has(entry.path)) });
+      this.listing.set({ ...current, entries: current.entries.filter((entry) => !isDeletedOrDescendant(entry.path)) });
     }
     setTimeout(() => this.refresh(), 600);
   }
