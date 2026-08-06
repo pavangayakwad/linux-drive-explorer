@@ -287,7 +287,13 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     }
     this.resetSearchUi();
 
-    await this.performLoad(path);
+    const loaded = await this.performLoad(path);
+    if (!loaded) {
+      // Path couldn't be opened (e.g. deleted since last visit) and we've redirected to the
+      // drive root instead - that redirect will run this handler again for the root path, so
+      // don't record the dead path as visited or touch lastMountPath/search restore here.
+      return;
+    }
 
     this.driveNavState.recordVisit(path);
 
@@ -306,21 +312,41 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     }
   }
 
-  private async performLoad(path: string): Promise<void> {
+  private applyListing(listing: DirectoryListing): void {
+    this.listing.set(listing);
+    const firstRow = this.sortedRows().at(0) ?? null;
+    this.selection.set(firstRow ? [firstRow] : []);
+    this.focusedPath.set(firstRow?.path ?? null);
+    this.anchorPath = firstRow?.path ?? null;
+    this.trackVisibleFolderSizes();
+    this.pendingFocusPath.set(firstRow?.path ?? null);
+  }
+
+  /** Returns false when `path` couldn't be opened. If `path` belongs to a known drive, the
+   * caller is redirected to that drive's root instead of leaving the previous drive's stale
+   * listing on screen. */
+  private async performLoad(path: string): Promise<boolean> {
     this.loading.set(true);
     this.errorMessage.set(null);
     this.resetSizeTracker();
     try {
       const listing = await this.filesService.list(path);
-      this.listing.set(listing);
-      const firstRow = this.sortedRows().at(0) ?? null;
-      this.selection.set(firstRow ? [firstRow] : []);
-      this.focusedPath.set(firstRow?.path ?? null);
-      this.anchorPath = firstRow?.path ?? null;
-      this.trackVisibleFolderSizes();
-      this.pendingFocusPath.set(firstRow?.path ?? null);
+      this.applyListing(listing);
+      return true;
     } catch {
+      this.driveNavState.forgetPath(path);
+      const mountPath = this.driveNavState.mountPathFor(path);
+      if (mountPath && mountPath !== path) {
+        this.listing.set(null);
+        this.navigateTo(mountPath);
+        return false;
+      }
+      this.listing.set(null);
+      this.selection.set([]);
+      this.focusedPath.set(null);
+      this.anchorPath = null;
       this.errorMessage.set(`Could not open "${path}".`);
+      return false;
     } finally {
       this.loading.set(false);
     }

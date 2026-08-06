@@ -53,6 +53,16 @@ export class DriveNavigationStateService {
     this.persistHistory();
   }
 
+  /** Removes `path` from history - used when a previously visited path can no longer be opened
+   * (e.g. its folder was deleted), so drive switches don't keep restoring a dead path. */
+  forgetPath(path: string): void {
+    const existingIndex = this.visitedPaths.indexOf(path);
+    if (existingIndex !== -1) {
+      this.visitedPaths.splice(existingIndex, 1);
+      this.persistHistory();
+    }
+  }
+
   /** Returns the most recently visited path belonging to `mountPath`, if any. */
   getPath(mountPath: string): string | undefined {
     for (let i = this.visitedPaths.length - 1; i >= 0; i--) {
