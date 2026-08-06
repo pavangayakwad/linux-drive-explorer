@@ -523,11 +523,11 @@ export class ExplorerComponent implements OnInit, OnDestroy {
         break;
       case 'PageDown':
         event.preventDefault();
-        this.moveFocus(Infinity, event.shiftKey);
+        this.moveFocus(this.getPageSize(), event.shiftKey);
         break;
       case 'PageUp':
         event.preventDefault();
-        this.moveFocus(-Infinity, event.shiftKey);
+        this.moveFocus(-this.getPageSize(), event.shiftKey);
         break;
       case 'Enter':
         event.preventDefault();
@@ -593,6 +593,15 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       this.searchDebounceHandle = null;
       void this.runSearch();
     }, ExplorerComponent.SEARCH_DEBOUNCE_MS);
+  }
+
+  private getPageSize(): number {
+    const container = this.elementRef.nativeElement.querySelector('.p-datatable-table-container') as HTMLElement | null;
+    const row = this.elementRef.nativeElement.querySelector('tbody tr') as HTMLElement | null;
+    if (!container || !row || row.offsetHeight === 0) {
+      return 1;
+    }
+    return Math.max(1, Math.floor(container.clientHeight / row.offsetHeight));
   }
 
   private moveFocus(delta: number, extend: boolean): void {
