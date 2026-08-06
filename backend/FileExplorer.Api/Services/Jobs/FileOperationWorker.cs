@@ -183,11 +183,12 @@ public class FileOperationWorker(
                     Report(force: false);
                 },
                 ct);
-        }
 
-        if (move)
-        {
-            foreach (var (physicalSource, _) in plan)
+            // Delete each source immediately once its own copy lands, rather than in a
+            // second pass after everything is copied - otherwise a cancellation or crash
+            // between the two passes leaves already-copied items duplicated at both ends
+            // instead of moved.
+            if (move)
             {
                 FileTreeOperations.DeleteRecursive(physicalSource, () => { }, ct);
             }
