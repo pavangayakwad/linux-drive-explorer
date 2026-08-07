@@ -2,11 +2,16 @@
   <app-sidebar
     class="shell__sidebar"
     [drives]="drives()"
+    [unmountedDevices]="unmountedDevices()"
     [currentPath]="currentPath()"
     [refreshingDrives]="refreshingDrives()"
+    [mountingDevice]="mountingDevice()"
+    [unmountingPath]="unmountingPath()"
     [runningTaskCount]="runningTaskCount()"
     (navigate)="onNavigate($event)"
     (refreshDrives)="refreshDrives()"
+    (mountDevice)="mountDevice($event)"
+    (unmountDrive)="unmountDrive($event)"
   />
   <div class="shell__resizer" (mousedown)="startResize($event)"></div>
   <div class="shell__main">

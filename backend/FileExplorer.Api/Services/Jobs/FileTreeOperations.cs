@@ -54,20 +54,24 @@ public static class FileTreeOperations
 
     /// <summary>Copies a file or directory tree, invoking onBytesCopied after every chunk written (so progress for a
     /// single large file is visible mid-copy, not just once the whole file lands) and onItemCompleted once per
-    /// file/folder finished.</summary>
-    public static void CopyRecursive(string sourcePhysical, string destPhysical, Action<long> onBytesCopied, Action onItemCompleted, CancellationToken ct)
+    /// file/folder finished.
+    ///
+    /// Uses real async file I/O (FileOptions.Asynchronous + ReadAsync/WriteAsync) rather than blocking Read/Write,
+    /// so a slow/saturated disk only borrows a ThreadPool worker for the duration of each chunk's syscall instead of
+    /// pinning one thread for the copy's entire multi-hour lifetime - see the 8-hour-move near-freeze writeup.</summary>
+    public static async Task CopyRecursiveAsync(string sourcePhysical, string destPhysical, Func<long, Task> onBytesCopied, Func<Task> onItemCompleted, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
         if (File.Exists(sourcePhysical))
         {
-            CopyFileWithProgress(sourcePhysical, destPhysical, onBytesCopied, ct);
-            onItemCompleted();
+            await CopyFileWithProgressAsync(sourcePhysical, destPhysical, onBytesCopied, ct);
+            await onItemCompleted();
             return;
         }
 
         Directory.CreateDirectory(destPhysical);
-        onItemCompleted();
+        await onItemCompleted();
 
         foreach (var entry in Directory.EnumerateFileSystemEntries(sourcePhysical))
         {
@@ -75,28 +79,27 @@ public static class FileTreeOperations
             var destEntry = Path.Combine(destPhysical, Path.GetFileName(entry));
             if (Directory.Exists(entry))
             {
-                CopyRecursive(entry, destEntry, onBytesCopied, onItemCompleted, ct);
+                await CopyRecursiveAsync(entry, destEntry, onBytesCopied, onItemCompleted, ct);
             }
             else
             {
-                CopyFileWithProgress(entry, destEntry, onBytesCopied, ct);
-                onItemCompleted();
+                await CopyFileWithProgressAsync(entry, destEntry, onBytesCopied, ct);
+                await onItemCompleted();
             }
         }
     }
 
-    private static void CopyFileWithProgress(string sourcePhysical, string destPhysical, Action<long> onBytesCopied, CancellationToken ct)
+    private static async Task CopyFileWithProgressAsync(string sourcePhysical, string destPhysical, Func<long, Task> onBytesCopied, CancellationToken ct)
     {
-        using var source = new FileStream(sourcePhysical, FileMode.Open, FileAccess.Read, FileShare.Read, CopyBufferSize, FileOptions.SequentialScan);
-        using var dest = new FileStream(destPhysical, FileMode.CreateNew, FileAccess.Write, FileShare.None, CopyBufferSize);
+        await using var source = new FileStream(sourcePhysical, FileMode.Open, FileAccess.Read, FileShare.Read, CopyBufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
+        await using var dest = new FileStream(destPhysical, FileMode.CreateNew, FileAccess.Write, FileShare.None, CopyBufferSize, FileOptions.Asynchronous);
 
         var buffer = new byte[CopyBufferSize];
         int read;
-        while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+        while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
         {
-            ct.ThrowIfCancellationRequested();
-            dest.Write(buffer, 0, read);
-            onBytesCopied(read);
+            await dest.WriteAsync(buffer.AsMemory(0, read), ct);
+            await onBytesCopied(read);
         }
     }
 

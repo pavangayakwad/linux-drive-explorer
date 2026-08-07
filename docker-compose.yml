@@ -4,6 +4,13 @@ services:
       context: ./backend/FileExplorer.Api
     container_name: file-explorer-api
     restart: unless-stopped
+    # Required for the mount/unmount feature: the API shells out to `nsenter --target 1 ...` to run
+    # mount/umount inside the host's own namespaces (PID 1's), since a plain `mount` here would only
+    # affect this container's private mount namespace and never reach the real host. `privileged: true`
+    # grants the capabilities nsenter needs (CAP_SYS_ADMIN, /dev access); `pid: host` gives it a PID 1
+    # to target. See README.md's Architecture section for the security implications.
+    privileged: true
+    pid: host
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       Jwt__Key: ${JWT_KEY:?Set JWT_KEY in your .env file - see .env.example}

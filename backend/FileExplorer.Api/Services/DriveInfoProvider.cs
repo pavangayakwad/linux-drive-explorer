@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using FileExplorer.Api.Models.Dtos;
 
@@ -14,6 +15,13 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
 
     private static readonly string[] PseudoMountPrefixes = ["/proc", "/sys", "/dev", "/run"];
 
+    /// <summary>Carved out of the "/run" pseudo-mount filter above: udisks2-based distros (Fedora, Arch, ...)
+    /// auto-mount removable media at /run/media/$USER/&lt;label&gt; by default, which would otherwise be
+    /// indistinguishable from /run's usual noise (tmpfs runtime state, /run/lock, etc.). Debian/Ubuntu's
+    /// equivalent convention, /media/$USER/&lt;label&gt;, doesn't need a carve-out since it never matches the
+    /// "/run" prefix in the first place.</summary>
+    private const string RunMediaPrefix = "/run/media/";
+
     /// <summary>Substrings of mount paths that are host/container implementation detail, not a volume a user would
     /// ever want to browse (EFI system partitions, Docker's internal overlay2 storage, etc.).</summary>
     private static readonly string[] NoiseMountPathSubstrings = ["/boot/efi", "/var/lib/docker"];
@@ -22,10 +30,38 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
     /// hide unrelated real mounts that merely contain that text (e.g. "/mnt/reboot-backup").</summary>
     private static readonly HashSet<string> NoiseMountPaths = new(StringComparer.OrdinalIgnoreCase) { "/boot" };
 
-    private static readonly string[] RemovableMountPrefixes = ["/mnt/", "/media/"];
+    private static readonly string[] RemovableMountPrefixes = ["/mnt/", "/media/", RunMediaPrefix];
+
+    /// <summary>Block devices that report as "removable" in sysfs but aren't real user-facing media
+    /// (loopback mounts, RAM disks, device-mapper targets) - never worth offering as mountable.</summary>
+    private static readonly string[] ExcludedBlockDevicePrefixes = ["loop", "ram", "dm-", "zram"];
 
     [GeneratedRegex(@"^(sd[a-z]+|vd[a-z]+|xvd[a-z]+|nvme\d+n\d+|mmcblk\d+)")]
     private static partial Regex BaseBlockDeviceRegex();
+
+    private static readonly TimeSpan DrivesAsyncTimeout = TimeSpan.FromSeconds(5);
+    private IReadOnlyList<DriveSummaryDto> lastKnownDrives = [];
+
+    public async Task<IReadOnlyList<DriveSummaryDto>> GetDrivesAsync(CancellationToken ct)
+    {
+        try
+        {
+            // GetDrives() itself blocks on statvfs(2) per mount, which can stall for a long time against a
+            // mount saturated by a concurrent large copy/move. Task.Run keeps that block off of whichever
+            // thread is awaiting this call, and WaitAsync bounds how long the caller (an HTTP request, polled
+            // every 60s by the frontend) waits for it - past the deadline, fall back to the last good snapshot
+            // rather than hang the request/connection. The orphaned Task.Run continues in the background since
+            // statvfs isn't cancellable, but it no longer blocks request handling. See the 8-hour-move
+            // near-freeze writeup for the incident this addresses.
+            var drives = await Task.Run(GetDrives, ct).WaitAsync(DrivesAsyncTimeout, ct);
+            lastKnownDrives = drives;
+            return drives;
+        }
+        catch (TimeoutException)
+        {
+            return lastKnownDrives;
+        }
+    }
 
     public IReadOnlyList<DriveSummaryDto> GetDrives()
     {
@@ -53,7 +89,8 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
                 continue;
             }
 
-            if (PseudoMountPrefixes.Any(prefix => mountFullPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            var isRunMedia = mountFullPath.StartsWith(RunMediaPrefix, StringComparison.OrdinalIgnoreCase);
+            if (!isRunMedia && PseudoMountPrefixes.Any(prefix => mountFullPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }
@@ -123,6 +160,140 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
         return results.Values
             .OrderBy(d => d.MountPath, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    public IReadOnlyList<UnmountedDeviceDto> GetUnmountedRemovableDevices()
+    {
+        const string sysBlockPath = "/sys/block";
+        if (!OperatingSystem.IsLinux() || !Directory.Exists(sysBlockPath))
+        {
+            return [];
+        }
+
+        var mountedDevices = new HashSet<string>(
+            ReadMounts().Values.Select(entry => entry.Device),
+            StringComparer.OrdinalIgnoreCase);
+
+        var results = new List<UnmountedDeviceDto>();
+
+        foreach (var diskDir in Directory.GetDirectories(sysBlockPath))
+        {
+            var diskName = Path.GetFileName(diskDir)!;
+            if (ExcludedBlockDevicePrefixes.Any(prefix => diskName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            if (!IsSysfsRemovableDisk(diskDir))
+            {
+                continue;
+            }
+
+            // Real partitions are marked in sysfs with a "partition" file (containing the partition
+            // number) inside their subdirectory - a naming-agnostic way to tell them apart from other
+            // sysfs entries (e.g. "queue", "holders") that also live under the disk directory.
+            var partitionDirs = Directory.GetDirectories(diskDir)
+                .Where(dir => File.Exists(Path.Combine(dir, "partition")))
+                .ToList();
+
+            // Some USB sticks carry a filesystem directly on the whole-disk device with no partition
+            // table at all - fall back to the disk itself as the single mountable candidate.
+            List<(string Name, string SizePath)> candidates = partitionDirs.Count > 0
+                ? partitionDirs.Select(dir => (Path.GetFileName(dir)!, Path.Combine(dir, "size"))).ToList()
+                : [(diskName, Path.Combine(diskDir, "size"))];
+
+            foreach (var (name, sizePath) in candidates)
+            {
+                var devicePath = $"/dev/{name}";
+                if (mountedDevices.Contains(devicePath))
+                {
+                    continue;
+                }
+
+                var sizeBytes = TryReadSectorSizeBytes(sizePath);
+                var (label, fsType) = ReadBlkidInfo(devicePath);
+                results.Add(new UnmountedDeviceDto(devicePath, label, fsType, sizeBytes));
+            }
+        }
+
+        return results;
+    }
+
+    private static bool IsSysfsRemovableDisk(string diskDir)
+    {
+        try
+        {
+            return File.ReadAllText(Path.Combine(diskDir, "removable")).Trim() == "1";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>sysfs reports block device sizes in 512-byte sectors regardless of the device's actual
+    /// physical sector size - see Linux's Documentation/block/capability.rst.</summary>
+    private static long? TryReadSectorSizeBytes(string sizePath)
+    {
+        try
+        {
+            return long.TryParse(File.ReadAllText(sizePath).Trim(), out var sectors) ? sectors * 512L : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Best-effort filesystem label/type lookup - `blkid` may be absent, may need privileges
+    /// this process doesn't have, or may simply find no signature on unformatted media, all of which
+    /// should degrade to null fields rather than fail the whole device listing.</summary>
+    private static (string? Label, string? FsType) ReadBlkidInfo(string devicePath)
+    {
+        try
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "blkid",
+                    ArgumentList = { "-o", "export", devicePath },
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                },
+            };
+            process.Start();
+            var output = process.StandardOutput.ReadToEnd();
+            process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            string? label = null;
+            string? fsType = null;
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = line.Split('=', 2);
+                if (parts.Length != 2)
+                {
+                    continue;
+                }
+
+                if (parts[0] == "LABEL")
+                {
+                    label = parts[1].Trim();
+                }
+                else if (parts[0] == "TYPE")
+                {
+                    fsType = parts[1].Trim();
+                }
+            }
+
+            return (label, fsType);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException)
+        {
+            return (null, null);
+        }
     }
 
     /// <summary>A drive is removable if its underlying block device reports so via sysfs, or - when that can't be

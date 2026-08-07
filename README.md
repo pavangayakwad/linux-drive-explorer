@@ -93,6 +93,14 @@ host's real `/` is bind-mounted there, so the API can reach anything the host ca
 the host. Treat it accordingly: keep it off the public internet, put it behind a
 trusted network/VPN, and always set a strong `JWT_KEY` and admin password (see below).
 
+Mounting/unmounting removable drives from the UI goes a step further: the `api`
+container runs `privileged: true` with `pid: host` (see `docker-compose.yml`) so it can
+run `nsenter --target 1 ...` and execute `mount`/`umount` inside the *host's* own
+namespaces — a mount issued from inside an unprivileged container's own namespace would
+never be visible on the host. This gives the container full control over the host, on
+top of already running as root, so the same network-isolation advice above applies even
+more strongly. Mount/unmount is restricted server-side to devices under `/mnt` only.
+
 ## Quick start with Docker Compose
 
 This is the recommended way to run the app. It builds two containers — `api` (the

@@ -26,6 +26,13 @@ export interface DriveSummary {
   isRemovable: boolean;
 }
 
+export interface UnmountedDevice {
+  device: string;
+  label: string | null;
+  fsType: string | null;
+  sizeBytes: number | null;
+}
+
 export type DirectorySizeStatus = 'Running' | 'Completed' | 'Cancelled' | 'Failed';
 
 export interface DirectorySizeJob {

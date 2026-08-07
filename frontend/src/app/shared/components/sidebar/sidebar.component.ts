@@ -1,13 +1,13 @@
 import { CommonModule } from '@angular/common';
 import { Component, computed, ElementRef, EventEmitter, HostListener, Input, Output, QueryList, ViewChildren, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
-import { MenuItem } from 'primeng/api';
+import { ConfirmationService, MenuItem } from 'primeng/api';
 import { MenuModule } from 'primeng/menu';
 import { TooltipModule } from 'primeng/tooltip';
 import { AuthService } from '../../../core/services/auth.service';
 import { ThemeService, THEME_COLORS, THEME_MODES, ThemeMode } from '../../../core/services/theme.service';
 import { ThemeColor } from '../../../core/models/auth.model';
-import { DriveSummary } from '../../../core/models/file-system.model';
+import { DriveSummary, UnmountedDevice } from '../../../core/models/file-system.model';
 import { DriveNavigationStateService } from '../../../core/services/drive-navigation-state.service';
 import { formatBytes } from '../../format.util';
 import { ChangePasswordDialogComponent } from '../change-password-dialog/change-password-dialog.component';
@@ -37,11 +37,16 @@ const THEME_MODE_ICONS: Record<ThemeMode, string> = {
 })
 export class SidebarComponent {
   @Input() drives: DriveSummary[] = [];
+  @Input() unmountedDevices: UnmountedDevice[] = [];
   @Input() currentPath = '/';
   @Input() refreshingDrives = false;
+  @Input() mountingDevice: string | null = null;
+  @Input() unmountingPath: string | null = null;
   @Input() runningTaskCount = 0;
   @Output() readonly navigate = new EventEmitter<string>();
   @Output() readonly refreshDrives = new EventEmitter<void>();
+  @Output() readonly mountDevice = new EventEmitter<string>();
+  @Output() readonly unmountDrive = new EventEmitter<string>();
 
   @ViewChildren('driveItem') private readonly driveItems?: QueryList<ElementRef<HTMLButtonElement>>;
 
@@ -78,6 +83,7 @@ export class SidebarComponent {
     readonly authService: AuthService,
     private readonly themeService: ThemeService,
     private readonly driveNavState: DriveNavigationStateService,
+    private readonly confirmationService: ConfirmationService,
   ) {}
 
   logout(): void {
@@ -128,9 +134,28 @@ export class SidebarComponent {
     return this.currentPath === drive.mountPath || this.currentPath.startsWith(`${drive.mountPath}/`);
   }
 
+  // The backend only ever allows unmounting drives under /mnt (see HostMountService.UnmountAsync) -
+  // a removable drive the OS auto-mounted elsewhere (e.g. /run/media/$USER/<label> on udisks2
+  // distros, /media/$USER/<label> on Debian/Ubuntu) is browsable but not something this app can eject.
+  canUnmount(drive: DriveSummary): boolean {
+    return drive.isRemovable && (drive.mountPath === '/mnt' || drive.mountPath.startsWith('/mnt/'));
+  }
+
   select(drive: DriveSummary): void {
     // Re-selecting a drive that's already been visited this session returns to the folder (and,
     // via ExplorerComponent, the search) the user last left it at, rather than resetting to root.
     this.navigate.emit(this.driveNavState.getPath(drive.mountPath) ?? drive.mountPath);
+  }
+
+  confirmUnmount(event: MouseEvent, drive: DriveSummary): void {
+    event.stopPropagation();
+    this.confirmationService.confirm({
+      target: event.currentTarget as EventTarget,
+      header: 'Eject drive',
+      message: `Eject "${drive.name}"? Make sure no files on it are open elsewhere first.`,
+      icon: 'pi pi-exclamation-triangle',
+      acceptButtonProps: { severity: 'danger', label: 'Eject' },
+      accept: () => this.unmountDrive.emit(drive.mountPath),
+    });
   }
 }

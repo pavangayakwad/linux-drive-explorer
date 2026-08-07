@@ -44,9 +44,36 @@
         </div>
         <span class="sidebar__drive-space">{{ formatBytes(drive.freeBytes) }} free of {{ formatBytes(drive.totalBytes) }}</span>
       </div>
+      @if (canUnmount(drive)) {
+        <i
+          class="pi pi-eject sidebar__eject-btn"
+          [class.sidebar__eject-btn--busy]="unmountingPath === drive.mountPath"
+          pTooltip="Eject"
+          tooltipPosition="right"
+          (click)="unmountingPath !== drive.mountPath && confirmUnmount($event, drive)"
+        ></i>
+      }
     </button>
   } @empty {
     <div class="sidebar__empty">No drives detected</div>
+  }
+
+  @if (unmountedDevices.length > 0) {
+    <div class="sidebar__section-label">Ready to mount</div>
+    @for (device of unmountedDevices; track device.device) {
+      <button
+        type="button"
+        class="sidebar__item sidebar__item--drive"
+        [disabled]="mountingDevice === device.device"
+        (click)="mountDevice.emit(device.device)"
+      >
+        <i class="pi pi-sign-in" [class.sidebar__mount-icon--busy]="mountingDevice === device.device" pTooltip="Mount" tooltipPosition="right"></i>
+        <div class="sidebar__drive-info">
+          <span class="sidebar__drive-name">{{ device.label || device.device }}</span>
+          <span class="sidebar__drive-space">{{ device.device }}@if (device.sizeBytes) { &middot; {{ formatBytes(device.sizeBytes) }} }</span>
+        </div>
+      </button>
+    }
   }
 
   <span class="sidebar__spacer"></span>

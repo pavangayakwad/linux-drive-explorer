@@ -8,6 +8,13 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
+// Long-running file operation jobs and slow/network mounts can otherwise force the CLR ThreadPool's
+// slow one-thread-per-~1s injection heuristic to kick in before enough workers exist to keep serving
+// ordinary HTTP requests - raise the floor so a handful of stalled I/O calls can't starve the pool.
+// See the 8-hour-move near-freeze writeup for the incident this addresses.
+ThreadPool.GetMinThreads(out var minWorkerThreads, out var minCompletionPortThreads);
+ThreadPool.SetMinThreads(Math.Max(minWorkerThreads, 100), Math.Max(minCompletionPortThreads, 100));
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Options
@@ -22,7 +29,10 @@ builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connect
 // App services
 builder.Services.AddSingleton<IPathResolver, PathResolver>();
 builder.Services.AddScoped<IFileSystemService, FileSystemService>();
-builder.Services.AddScoped<IDriveInfoProvider, DriveInfoProvider>();
+// Singleton: DriveInfoProvider only depends on the (already-singleton) IPathResolver and holds no
+// per-request state, so HostMountService (also a singleton, for its process-wide mount/unmount lock)
+// can safely depend on it without a captive-dependency lifetime mismatch.
+builder.Services.AddSingleton<IDriveInfoProvider, DriveInfoProvider>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddSingleton<ITokenService, TokenService>();
 builder.Services.AddSingleton<IMountLocator, MountLocator>();
@@ -30,6 +40,7 @@ builder.Services.AddScoped<ITrashService, TrashService>();
 builder.Services.AddScoped<IPermissionsService, PermissionsService>();
 builder.Services.AddScoped<IFileOperationsService, FileOperationsService>();
 builder.Services.AddSingleton<IDirectorySizeService, DirectorySizeService>();
+builder.Services.AddSingleton<IHostMountService, HostMountService>();
 
 // Background file-operation job processing
 builder.Services.AddSingleton<IJobQueue, JobQueue>();

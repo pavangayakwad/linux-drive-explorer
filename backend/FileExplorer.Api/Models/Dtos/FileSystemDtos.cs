@@ -25,6 +25,12 @@ public record DriveSummaryDto(
     long FreeBytes,
     bool IsRemovable);
 
+public record UnmountedDeviceDto(string Device, string? Label, string? FsType, long? SizeBytes);
+
+public record MountDeviceRequest(string Device);
+
+public record UnmountDriveRequest(string MountPath);
+
 public record CreateEntryRequest(string ParentPath, string Name, bool IsDirectory);
 
 public record RenameRequest(string Path, string NewName);

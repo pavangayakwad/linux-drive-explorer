@@ -7,7 +7,7 @@ import { MessageService } from 'primeng/api';
 import { filter, map, startWith } from 'rxjs';
 import { DrivesService } from '../../core/services/drives.service';
 import { DriveNavigationStateService } from '../../core/services/drive-navigation-state.service';
-import { DriveSummary } from '../../core/models/file-system.model';
+import { DriveSummary, UnmountedDevice } from '../../core/models/file-system.model';
 import { Job } from '../../core/models/job.model';
 import { tokenStore } from '../../core/http/token-store';
 import { TasksService } from '../../core/services/tasks.service';
@@ -54,7 +54,10 @@ export class ShellComponent implements OnInit, OnDestroy {
   private readonly warnedPermanentDeleteCounts = new Map<string, number>();
 
   readonly drives = signal<DriveSummary[]>([]);
+  readonly unmountedDevices = signal<UnmountedDevice[]>([]);
   readonly refreshingDrives = signal(false);
+  readonly mountingDevice = signal<string | null>(null);
+  readonly unmountingPath = signal<string | null>(null);
   readonly sidebarWidth = signal(this.loadStoredWidth());
   readonly runningTaskCount = signal(0);
 
@@ -100,13 +103,57 @@ export class ShellComponent implements OnInit, OnDestroy {
     this.driveNavState.setDrives(this.drives());
   }
 
+  // The only place unmounted-device discovery happens - deliberately not part of loadDrives()'s
+  // periodic poll, so scanning /sys/block only ever runs when the user asks for it.
   async refreshDrives(): Promise<void> {
     this.refreshingDrives.set(true);
     try {
-      await this.loadDrives();
+      await Promise.all([this.loadDrives(), this.loadUnmountedDevices()]);
     } finally {
       this.refreshingDrives.set(false);
     }
+  }
+
+  private async loadUnmountedDevices(): Promise<void> {
+    try {
+      this.unmountedDevices.set(await this.drivesService.listUnmounted());
+    } catch {
+      this.unmountedDevices.set([]);
+    }
+  }
+
+  async mountDevice(device: string): Promise<void> {
+    this.mountingDevice.set(device);
+    try {
+      await this.drivesService.mount(device);
+      await this.refreshDrives();
+    } catch (error) {
+      this.messageService.add({ severity: 'error', summary: 'Mount failed', detail: this.extractError(error) });
+    } finally {
+      this.mountingDevice.set(null);
+    }
+  }
+
+  async unmountDrive(mountPath: string): Promise<void> {
+    this.unmountingPath.set(mountPath);
+    try {
+      await this.drivesService.unmount(mountPath);
+      await this.refreshDrives();
+    } catch (error) {
+      this.messageService.add({ severity: 'error', summary: 'Unmount failed', detail: this.extractError(error) });
+    } finally {
+      this.unmountingPath.set(null);
+    }
+  }
+
+  private extractError(error: unknown): string {
+    if (error && typeof error === 'object' && 'response' in error) {
+      const response = (error as { response?: { data?: { message?: string } } }).response;
+      if (response?.data?.message) {
+        return response.data.message;
+      }
+    }
+    return 'Something went wrong.';
   }
 
   private async loadInitialTaskCount(): Promise<void> {

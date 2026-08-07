@@ -81,19 +81,19 @@ public class FileOperationWorker(
             switch (job.Type)
             {
                 case FileOperationType.Copy:
-                    ExecuteCopyOrMove(job, db, pathResolver, move: false, ct);
+                    await ExecuteCopyOrMoveAsync(job, db, pathResolver, move: false, ct);
                     break;
                 case FileOperationType.Move:
-                    ExecuteCopyOrMove(job, db, pathResolver, move: true, ct);
+                    await ExecuteCopyOrMoveAsync(job, db, pathResolver, move: true, ct);
                     break;
                 case FileOperationType.Delete:
-                    ExecuteDelete(job, db, trashService, ct);
+                    await ExecuteDeleteAsync(job, db, trashService, ct);
                     break;
                 case FileOperationType.PurgeTrash:
-                    ExecutePurge(job, db, trashService, ct);
+                    await ExecutePurgeAsync(job, db, trashService, ct);
                     break;
                 case FileOperationType.Zip:
-                    ExecuteZip(job, db, pathResolver, fsOptions, ct);
+                    await ExecuteZipAsync(job, db, pathResolver, fsOptions, ct);
                     break;
             }
 
@@ -119,7 +119,7 @@ public class FileOperationWorker(
         }
     }
 
-    private void ExecuteCopyOrMove(FileOperationJob job, AppDbContext db, IPathResolver pathResolver, bool move, CancellationToken ct)
+    private async Task ExecuteCopyOrMoveAsync(FileOperationJob job, AppDbContext db, IPathResolver pathResolver, bool move, CancellationToken ct)
     {
         var destinationPhysical = pathResolver.ToPhysicalPath(job.DestinationPath!);
         Directory.CreateDirectory(destinationPhysical);
@@ -128,15 +128,18 @@ public class FileOperationWorker(
         long totalBytes = 0;
         var totalItems = 0;
 
+        // Directory-tree scanning (Measure/GetUniqueDestination) is offloaded to a pool thread via Task.Run
+        // rather than run inline, so a slow/network source mount only occupies a worker for the scan itself
+        // instead of blocking whichever thread happened to pick up this continuation.
         foreach (var virtualSource in job.GetSourcePaths())
         {
             var physicalSource = pathResolver.ToPhysicalPath(virtualSource);
-            var (items, bytes) = FileTreeOperations.Measure(physicalSource);
+            var (items, bytes) = await Task.Run(() => FileTreeOperations.Measure(physicalSource), ct);
             totalItems += items;
             totalBytes += bytes;
 
             var name = Path.GetFileName(physicalSource.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            var uniqueDestination = FileTreeOperations.GetUniqueDestination(destinationPhysical, name);
+            var uniqueDestination = await Task.Run(() => FileTreeOperations.GetUniqueDestination(destinationPhysical, name), ct);
             plan.Add((physicalSource, uniqueDestination));
         }
 
@@ -150,7 +153,7 @@ public class FileOperationWorker(
         // Item-count throttling alone leaves a single large file's progress bar frozen at 0% for its whole
         // copy (ProcessedItems only increments once the file finishes) - a time-based fallback keeps
         // mid-file byte progress flowing to the UI without flooding SignalR on every chunk.
-        void Report(bool force)
+        async Task Report(bool force)
         {
             var now = DateTime.UtcNow;
             var itemThresholdMet = job.ProcessedItems - lastReported >= reportEvery;
@@ -160,27 +163,27 @@ public class FileOperationWorker(
             }
             lastReported = job.ProcessedItems;
             lastReportedAt = now;
-            db.SaveChangesAsync(ct).GetAwaiter().GetResult();
-            BroadcastAsync(job, ct).GetAwaiter().GetResult();
+            await db.SaveChangesAsync(ct);
+            await BroadcastAsync(job, ct);
         }
 
-        Report(force: true);
+        await Report(force: true);
 
         foreach (var (physicalSource, physicalDestination) in plan)
         {
             job.CurrentItem = pathResolver.ToVirtualPath(physicalSource);
-            FileTreeOperations.CopyRecursive(
+            await FileTreeOperations.CopyRecursiveAsync(
                 physicalSource,
                 physicalDestination,
-                bytes =>
+                async bytes =>
                 {
                     job.ProcessedBytes += bytes;
-                    Report(force: false);
+                    await Report(force: false);
                 },
-                () =>
+                async () =>
                 {
                     job.ProcessedItems++;
-                    Report(force: false);
+                    await Report(force: false);
                 },
                 ct);
 
@@ -190,27 +193,29 @@ public class FileOperationWorker(
             // instead of moved.
             if (move)
             {
-                FileTreeOperations.DeleteRecursive(physicalSource, () => { }, ct);
+                await Task.Run(() => FileTreeOperations.DeleteRecursive(physicalSource, () => { }, ct), ct);
             }
         }
 
-        Report(force: true);
+        await Report(force: true);
     }
 
-    private void ExecuteDelete(FileOperationJob job, AppDbContext db, ITrashService trashService, CancellationToken ct)
+    private async Task ExecuteDeleteAsync(FileOperationJob job, AppDbContext db, ITrashService trashService, CancellationToken ct)
     {
         var sources = job.GetSourcePaths();
         job.TotalItems = sources.Count;
-        db.SaveChangesAsync(ct).GetAwaiter().GetResult();
-        BroadcastAsync(job, ct).GetAwaiter().GetResult();
+        await db.SaveChangesAsync(ct);
+        await BroadcastAsync(job, ct);
 
         foreach (var virtualSource in sources)
         {
             ct.ThrowIfCancellationRequested();
             job.CurrentItem = virtualSource;
-            var outcome = job.Permanent
-                ? trashService.DeleteForever(virtualSource)
-                : trashService.MoveToTrash(virtualSource, job.CreatedByUserId);
+            var outcome = await Task.Run(
+                () => job.Permanent
+                    ? trashService.DeleteForever(virtualSource)
+                    : trashService.MoveToTrash(virtualSource, job.CreatedByUserId),
+                ct);
             if (outcome.PermanentlyDeleted)
             {
                 job.AddPermanentlyDeletedName(outcome.Name);
@@ -220,18 +225,18 @@ public class FileOperationWorker(
                 db.TrashItems.Add(outcome.Item!);
             }
             job.ProcessedItems++;
-            db.SaveChangesAsync(ct).GetAwaiter().GetResult();
-            BroadcastAsync(job, ct).GetAwaiter().GetResult();
+            await db.SaveChangesAsync(ct);
+            await BroadcastAsync(job, ct);
         }
     }
 
-    private void ExecutePurge(FileOperationJob job, AppDbContext db, ITrashService trashService, CancellationToken ct)
+    private async Task ExecutePurgeAsync(FileOperationJob job, AppDbContext db, ITrashService trashService, CancellationToken ct)
     {
         var ids = job.GetSourcePaths().Select(Guid.Parse).ToHashSet();
         var items = db.TrashItems.Where(t => ids.Contains(t.Id)).ToList();
         job.TotalItems = items.Count;
-        db.SaveChangesAsync(ct).GetAwaiter().GetResult();
-        BroadcastAsync(job, ct).GetAwaiter().GetResult();
+        await db.SaveChangesAsync(ct);
+        await BroadcastAsync(job, ct);
 
         var trashRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -241,26 +246,29 @@ public class FileOperationWorker(
             job.CurrentItem = item.Name;
 
             var physical = trashService.ToPhysicalTrashPath(item);
-            FileTreeOperations.DeleteRecursive(physical, () => { }, ct);
-
-            var wrapperDir = Path.GetDirectoryName(physical);
-            if (wrapperDir is not null)
+            await Task.Run(() =>
             {
-                var trashRoot = Path.GetDirectoryName(wrapperDir);
-                if (trashRoot is not null)
+                FileTreeOperations.DeleteRecursive(physical, () => { }, ct);
+
+                var wrapperDir = Path.GetDirectoryName(physical);
+                if (wrapperDir is not null)
                 {
-                    trashRoots.Add(trashRoot);
+                    var trashRoot = Path.GetDirectoryName(wrapperDir);
+                    if (trashRoot is not null)
+                    {
+                        trashRoots.Add(trashRoot);
+                    }
+                    if (Directory.Exists(wrapperDir) && !Directory.EnumerateFileSystemEntries(wrapperDir).Any())
+                    {
+                        Directory.Delete(wrapperDir);
+                    }
                 }
-                if (Directory.Exists(wrapperDir) && !Directory.EnumerateFileSystemEntries(wrapperDir).Any())
-                {
-                    Directory.Delete(wrapperDir);
-                }
-            }
+            }, ct);
 
             db.TrashItems.Remove(item);
             job.ProcessedItems++;
-            db.SaveChangesAsync(ct).GetAwaiter().GetResult();
-            BroadcastAsync(job, ct).GetAwaiter().GetResult();
+            await db.SaveChangesAsync(ct);
+            await BroadcastAsync(job, ct);
         }
 
         // Once every trashed item under a mount's trash root has been purged, remove the (now empty)
@@ -274,7 +282,7 @@ public class FileOperationWorker(
         }
     }
 
-    private void ExecuteZip(FileOperationJob job, AppDbContext db, IPathResolver pathResolver, FileSystemOptions fsOptions, CancellationToken ct)
+    private async Task ExecuteZipAsync(FileOperationJob job, AppDbContext db, IPathResolver pathResolver, FileSystemOptions fsOptions, CancellationToken ct)
     {
         var stagingDir = ZipStaging.GetStagingDirectory(pathResolver, fsOptions);
         Directory.CreateDirectory(stagingDir);
@@ -287,7 +295,7 @@ public class FileOperationWorker(
         foreach (var virtualSource in job.GetSourcePaths())
         {
             var physicalSource = pathResolver.ToPhysicalPath(virtualSource);
-            var (items, bytes) = FileTreeOperations.Measure(physicalSource);
+            var (items, bytes) = await Task.Run(() => FileTreeOperations.Measure(physicalSource), ct);
             totalItems += items;
             totalBytes += bytes;
 
@@ -302,7 +310,7 @@ public class FileOperationWorker(
         var lastReportedAt = DateTime.UtcNow;
         var reportInterval = TimeSpan.FromMilliseconds(500);
 
-        void Report(bool force)
+        async Task Report(bool force)
         {
             var now = DateTime.UtcNow;
             var itemThresholdMet = job.ProcessedItems - lastReported >= reportEvery;
@@ -312,24 +320,24 @@ public class FileOperationWorker(
             }
             lastReported = job.ProcessedItems;
             lastReportedAt = now;
-            db.SaveChangesAsync(ct).GetAwaiter().GetResult();
-            BroadcastAsync(job, ct).GetAwaiter().GetResult();
+            await db.SaveChangesAsync(ct);
+            await BroadcastAsync(job, ct);
         }
 
-        Report(force: true);
+        await Report(force: true);
 
         try
         {
-            using (var zipFileStream = new FileStream(zipPhysicalPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            await using (var zipFileStream = new FileStream(zipPhysicalPath, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024, FileOptions.Asynchronous))
             using (var archive = new ZipArchive(zipFileStream, ZipArchiveMode.Create))
             {
                 foreach (var (physicalPath, entryRootName) in plan)
                 {
                     job.CurrentItem = pathResolver.ToVirtualPath(physicalPath);
-                    AddToArchive(archive, physicalPath, entryRootName, job, Report, ct);
+                    await AddToArchiveAsync(archive, physicalPath, entryRootName, job, Report, ct);
                 }
             }
-            Report(force: true);
+            await Report(force: true);
         }
         catch
         {
@@ -338,17 +346,17 @@ public class FileOperationWorker(
         }
     }
 
-    private static void AddToArchive(ZipArchive archive, string physicalPath, string entryName, FileOperationJob job, Action<bool> report, CancellationToken ct)
+    private static async Task AddToArchiveAsync(ZipArchive archive, string physicalPath, string entryName, FileOperationJob job, Func<bool, Task> report, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
         if (Directory.Exists(physicalPath))
         {
             job.ProcessedItems++;
-            report(false);
+            await report(false);
             foreach (var child in Directory.EnumerateFileSystemEntries(physicalPath))
             {
-                AddToArchive(archive, child, $"{entryName}/{Path.GetFileName(child)}", job, report, ct);
+                await AddToArchiveAsync(archive, child, $"{entryName}/{Path.GetFileName(child)}", job, report, ct);
             }
             return;
         }
@@ -357,21 +365,20 @@ public class FileOperationWorker(
         entry.LastWriteTime = File.GetLastWriteTimeUtc(physicalPath);
 
         using (var entryStream = entry.Open())
-        using (var source = new FileStream(physicalPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.SequentialScan))
+        await using (var source = new FileStream(physicalPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.SequentialScan | FileOptions.Asynchronous))
         {
             var buffer = new byte[1024 * 1024];
             int read;
-            while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+            while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
             {
-                ct.ThrowIfCancellationRequested();
-                entryStream.Write(buffer, 0, read);
+                await entryStream.WriteAsync(buffer.AsMemory(0, read), ct);
                 job.ProcessedBytes += read;
-                report(false);
+                await report(false);
             }
         }
 
         job.ProcessedItems++;
-        report(false);
+        await report(false);
     }
 
     private static void TryDeleteFile(string physicalPath)
