@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.RegularExpressions;
 using FileExplorer.Api.Models.Dtos;
 
@@ -40,6 +41,11 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
     private static partial Regex BaseBlockDeviceRegex();
 
     private static readonly TimeSpan DrivesAsyncTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>Bounds how long a single `blkid` probe (see <see cref="ReadBlkidInfo"/>) is allowed to
+    /// block the unmounted-devices scan. A freshly plugged-in or spun-down disk can leave blkid waiting
+    /// on real I/O for a long time; without a bound, one distressed drive hangs the whole endpoint.</summary>
+    private static readonly TimeSpan BlkidTimeout = TimeSpan.FromSeconds(3);
     private IReadOnlyList<DriveSummaryDto> lastKnownDrives = [];
 
     public async Task<IReadOnlyList<DriveSummaryDto>> GetDrivesAsync(CancellationToken ct)
@@ -278,14 +284,42 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
                     UseShellExecute = false,
                 },
             };
+
+            var stdout = new StringBuilder();
+            // Drain both streams via the async event-based API instead of ReadToEnd()-ing stdout
+            // before touching stderr: a distressed/spinning-up drive can make blkid emit enough
+            // stderr I/O warnings to fill its pipe buffer, and since the child blocks writing to a
+            // full pipe while we're still blocked reading the other one, that sequential pattern
+            // deadlocks (see HostMountService.RunHostCommandAsync for the same fix on the mount path).
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is not null)
+                {
+                    stdout.AppendLine(e.Data);
+                }
+            };
+            process.ErrorDataReceived += (_, _) => { };
+
             process.Start();
-            var output = process.StandardOutput.ReadToEnd();
-            process.StandardError.ReadToEnd();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            // A freshly plugged-in or spun-down disk can leave blkid's probe blocked on real I/O far
+            // longer than this scan should ever wait - kill it and degrade to null fields rather than
+            // hang the whole "unmounted devices" endpoint (and, with it, the nginx proxy in front of it).
+            if (!process.WaitForExit((int)BlkidTimeout.TotalMilliseconds))
+            {
+                TryKill(process);
+                return (null, null);
+            }
+
+            // The int-overload of WaitForExit can return before the async output handlers above have
+            // finished draining the last buffered lines - the parameterless overload blocks until they have.
             process.WaitForExit();
 
             string? label = null;
             string? fsType = null;
-            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            foreach (var line in stdout.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
                 var parts = line.Split('=', 2);
                 if (parts.Length != 2)
@@ -308,6 +342,18 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException)
         {
             return (null, null);
+        }
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // Already exited on its own, or couldn't be killed - nothing more to do.
         }
     }
 
