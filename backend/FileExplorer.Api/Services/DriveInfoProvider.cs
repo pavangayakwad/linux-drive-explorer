@@ -155,7 +155,7 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
                     DriveFormat: drive.DriveFormat,
                     TotalBytes: drive.TotalSize,
                     FreeBytes: drive.AvailableFreeSpace,
-                    IsRemovable: IsRemovable(mountFullPath, mountDevices));
+                    IsRemovable: IsRemovable(mountFullPath, virtualPath, mountDevices));
             }
             catch (IOException)
             {
@@ -361,10 +361,15 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
     /// /media, or - for drives mounted elsewhere - if its underlying block device reports so via sysfs. The path
     /// check takes priority: sysfs's "removable" flag targets USB/floppy/CD media and reads "0" for drives in a
     /// SATA hot-swap bay even though they're routinely unplugged/replugged, which is exactly the case this app's
-    /// mount feature exists for (see GetSystemDiskNames for the same caveat).</summary>
-    private static bool IsRemovable(string mountFullPath, IReadOnlyDictionary<string, string> mountDevices)
+    /// mount feature exists for (see GetSystemDiskNames for the same caveat).
+    ///
+    /// Checked against the virtual (root-relative) path, not the physical mountFullPath: when the configured
+    /// root is a bind-mounted prefix like /host_root (see docker-compose.yml), the physical path is
+    /// /host_root/mnt/&lt;folder&gt;, which never starts with the literal "/mnt/" the RemovableMountPrefixes convention
+    /// assumes.</summary>
+    private static bool IsRemovable(string mountFullPath, string virtualPath, IReadOnlyDictionary<string, string> mountDevices)
     {
-        if (RemovableMountPrefixes.Any(prefix => (mountFullPath + "/").StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+        if (RemovableMountPrefixes.Any(prefix => (virtualPath + "/").StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }
