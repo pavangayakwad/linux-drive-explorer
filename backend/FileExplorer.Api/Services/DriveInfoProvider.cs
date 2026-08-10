@@ -357,21 +357,19 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
         }
     }
 
-    /// <summary>A drive is removable if its underlying block device reports so via sysfs, or - when that can't be
-    /// determined (non-Linux, network share, sysfs unreadable) - if it's mounted under a conventional removable-media
-    /// path such as /mnt or /media.</summary>
+    /// <summary>A drive is removable if it's mounted under a conventional removable-media path such as /mnt or
+    /// /media, or - for drives mounted elsewhere - if its underlying block device reports so via sysfs. The path
+    /// check takes priority: sysfs's "removable" flag targets USB/floppy/CD media and reads "0" for drives in a
+    /// SATA hot-swap bay even though they're routinely unplugged/replugged, which is exactly the case this app's
+    /// mount feature exists for (see GetSystemDiskNames for the same caveat).</summary>
     private static bool IsRemovable(string mountFullPath, IReadOnlyDictionary<string, string> mountDevices)
     {
-        if (mountDevices.TryGetValue(mountFullPath, out var device))
+        if (RemovableMountPrefixes.Any(prefix => (mountFullPath + "/").StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
         {
-            var sysfsResult = TryReadSysfsRemovable(device);
-            if (sysfsResult.HasValue)
-            {
-                return sysfsResult.Value;
-            }
+            return true;
         }
 
-        return RemovableMountPrefixes.Any(prefix => (mountFullPath + "/").StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        return mountDevices.TryGetValue(mountFullPath, out var device) && TryReadSysfsRemovable(device) == true;
     }
 
     private static bool? TryReadSysfsRemovable(string device)
