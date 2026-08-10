@@ -18,12 +18,6 @@ public partial class HostMountService(
     private const string HostMountRoot = "/mnt";
     private static readonly TimeSpan MountVisibilityTimeout = TimeSpan.FromSeconds(3);
 
-    /// <summary>Bounds how long a single host command (mkdir/mount/umount/rmdir via nsenter) is allowed
-    /// to block a request. Without this, a spinning-up or unresponsive disk can leave the underlying
-    /// mount(2)/umount(2) syscall blocked in the kernel for far longer than nginx's own proxy read
-    /// timeout, which then surfaces to the user as an opaque 504 instead of an actionable error.</summary>
-    private static readonly TimeSpan HostCommandTimeout = TimeSpan.FromSeconds(20);
-
     [GeneratedRegex(@"[^A-Za-z0-9_-]+")]
     private static partial Regex UnsafeNameCharsRegex();
 
@@ -217,19 +211,13 @@ public partial class HostMountService(
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
 
-        using var timeoutCts = new CancellationTokenSource(HostCommandTimeout);
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-        try
-        {
-            await process.WaitForExitAsync(linkedCts.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-        {
-            TryKillProcessTree(process);
-            throw new MountOperationException(
-                $"'{exe}' timed out after {HostCommandTimeout.TotalSeconds:0}s - the device may be slow to respond (e.g. spinning up) or unresponsive. Try again in a moment.");
-        }
-
+        // No app-imposed timeout here: a spinning-up disk can legitimately keep mount(2)/umount(2)
+        // blocked in the kernel for a while, and cutting that off early would fail requests the OS
+        // itself would have completed. Only the caller's cancellationToken (e.g. the client aborting
+        // the HTTP request) stops the wait early; otherwise this waits until the host command itself
+        // returns. nginx's proxy_read_timeout is set to 3600s (frontend/nginx.conf) so it won't cut in
+        // first.
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         var stderr = await stderrTask.ConfigureAwait(false);
         await stdoutTask.ConfigureAwait(false);
 
@@ -237,18 +225,6 @@ public partial class HostMountService(
         {
             throw new MountOperationException(
                 string.IsNullOrWhiteSpace(stderr) ? $"'{exe}' failed with exit code {process.ExitCode}." : stderr.Trim());
-        }
-    }
-
-    private static void TryKillProcessTree(Process process)
-    {
-        try
-        {
-            process.Kill(entireProcessTree: true);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
-        {
-            // Already exited on its own, or couldn't be killed - nothing more to do.
         }
     }
 }
