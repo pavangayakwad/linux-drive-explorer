@@ -52,6 +52,63 @@ public static class FileTreeOperations
 
     private const int CopyBufferSize = 1024 * 1024; // 1 MiB
 
+    /// <summary>How long a single chunk read/write is allowed to make no progress before it's treated as a
+    /// stalled/disconnected device rather than just a slow one. 1 MiB chunks completing in under a minute holds
+    /// even for very slow media (the incident this guards against averaged ~2 MB/s over 8 hours); past that,
+    /// the device is presumed gone.</summary>
+    private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>Bounds a single async I/O call so it can be abandoned instead of waited on forever. A blocked
+    /// kernel-level read/write against an unresponsive or disconnected device (network share timeout, a USB
+    /// drive that stopped answering) cannot be forcibly interrupted from managed code - CancellationToken only
+    /// stops an operation that hasn't started yet. Task.WaitAsync sidesteps that: it returns the instant the
+    /// token fires or the timeout elapses, regardless of whether the underlying operation ever completes, which
+    /// is what lets Cancel (and this timeout) actually take effect on a hung copy/move/delete/zip instead of
+    /// leaving the job - and the Cancel button - stuck indefinitely.</summary>
+    internal static async Task<int> GuardAsync(ValueTask<int> operation, string path, CancellationToken ct)
+    {
+        try
+        {
+            return await operation.AsTask().WaitAsync(StallTimeout, ct);
+        }
+        catch (TimeoutException)
+        {
+            throw StallException(path);
+        }
+    }
+
+    internal static async Task GuardAsync(ValueTask operation, string path, CancellationToken ct)
+    {
+        try
+        {
+            await operation.AsTask().WaitAsync(StallTimeout, ct);
+        }
+        catch (TimeoutException)
+        {
+            throw StallException(path);
+        }
+    }
+
+    private static IOException StallException(string path) =>
+        new($"'{path}' stopped responding (no progress for {(int)StallTimeout.TotalSeconds}s) - the device may be disconnected or unresponsive.");
+
+    /// <summary>Fire-and-forget best-effort close: if a read/write against this stream was abandoned via
+    /// GuardAsync above, it may genuinely still be blocked in the kernel. Awaiting Dispose here could hang or
+    /// throw while racing that in-flight call and would mask the real cancellation/stall error, so this
+    /// deliberately isn't awaited by the caller - it either closes immediately (the common case) or finishes
+    /// quietly on its own later.</summary>
+    internal static async Task DisposeQuietlyAsync(Stream stream)
+    {
+        try
+        {
+            await stream.DisposeAsync();
+        }
+        catch
+        {
+            // Best-effort only - see summary above.
+        }
+    }
+
     /// <summary>Copies a file or directory tree, invoking onBytesCopied after every chunk written (so progress for a
     /// single large file is visible mid-copy, not just once the whole file lands) and onItemCompleted once per
     /// file/folder finished.
@@ -91,15 +148,23 @@ public static class FileTreeOperations
 
     private static async Task CopyFileWithProgressAsync(string sourcePhysical, string destPhysical, Func<long, Task> onBytesCopied, CancellationToken ct)
     {
-        await using var source = new FileStream(sourcePhysical, FileMode.Open, FileAccess.Read, FileShare.Read, CopyBufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
-        await using var dest = new FileStream(destPhysical, FileMode.CreateNew, FileAccess.Write, FileShare.None, CopyBufferSize, FileOptions.Asynchronous);
+        var source = new FileStream(sourcePhysical, FileMode.Open, FileAccess.Read, FileShare.Read, CopyBufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
+        var dest = new FileStream(destPhysical, FileMode.CreateNew, FileAccess.Write, FileShare.None, CopyBufferSize, FileOptions.Asynchronous);
 
-        var buffer = new byte[CopyBufferSize];
-        int read;
-        while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+        try
         {
-            await dest.WriteAsync(buffer.AsMemory(0, read), ct);
-            await onBytesCopied(read);
+            var buffer = new byte[CopyBufferSize];
+            int read;
+            while ((read = await GuardAsync(source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct), sourcePhysical, ct)) > 0)
+            {
+                await GuardAsync(dest.WriteAsync(buffer.AsMemory(0, read), ct), destPhysical, ct);
+                await onBytesCopied(read);
+            }
+        }
+        finally
+        {
+            _ = DisposeQuietlyAsync(source);
+            _ = DisposeQuietlyAsync(dest);
         }
     }
 

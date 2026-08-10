@@ -170,21 +170,19 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
             return [];
         }
 
+        var mounts = ReadMounts();
         var mountedDevices = new HashSet<string>(
-            ReadMounts().Values.Select(entry => entry.Device),
+            mounts.Values.Select(entry => entry.Device),
             StringComparer.OrdinalIgnoreCase);
+        var systemDiskNames = GetSystemDiskNames(mounts, pathResolver.RootPath);
 
         var results = new List<UnmountedDeviceDto>();
 
         foreach (var diskDir in Directory.GetDirectories(sysBlockPath))
         {
             var diskName = Path.GetFileName(diskDir)!;
-            if (ExcludedBlockDevicePrefixes.Any(prefix => diskName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
-            {
-                continue;
-            }
-
-            if (!IsSysfsRemovableDisk(diskDir))
+            if (ExcludedBlockDevicePrefixes.Any(prefix => diskName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                || systemDiskNames.Contains(diskName))
             {
                 continue;
             }
@@ -219,16 +217,33 @@ public partial class DriveInfoProvider(IPathResolver pathResolver) : IDriveInfoP
         return results;
     }
 
-    private static bool IsSysfsRemovableDisk(string diskDir)
+    /// <summary>Base block devices backing the OS's own boot/root filesystems (e.g. "nvme0n1" for a root
+    /// filesystem on "/dev/nvme0n1p2") - excluded from the mountable-device list regardless of sysfs's
+    /// "removable" flag. That flag can't be used to identify hot-swappable data disks here: it targets
+    /// USB/floppy/CD media, and reads "0" for drives in a SATA hot-swap bay even though they're routinely
+    /// unplugged/replugged, which is exactly the case this app's mount feature exists for.
+    ///
+    /// Looked up by physical mount path (rootPath itself, rootPath/boot, rootPath/boot/efi), not "/",
+    /// "/boot", "/boot/efi" directly: in the container deployment the host's root is bind-mounted at
+    /// rootPath (e.g. "/host_root", see docker-compose.yml), so /proc/mounts records the host's root
+    /// filesystem there, not at "/" - the container's own "/" is just its overlay writable layer.</summary>
+    private static HashSet<string> GetSystemDiskNames(IReadOnlyDictionary<string, MountEntry> mounts, string rootPath)
     {
-        try
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var relative in new[] { "", "boot", "boot/efi" })
         {
-            return File.ReadAllText(Path.Combine(diskDir, "removable")).Trim() == "1";
+            var mountPoint = relative.Length == 0 ? rootPath : $"{rootPath}/{relative}";
+            if (!mounts.TryGetValue(mountPoint, out var entry) || !entry.Device.StartsWith("/dev/", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var deviceName = entry.Device["/dev/".Length..];
+            var match = BaseBlockDeviceRegex().Match(deviceName);
+            names.Add(match.Success ? match.Value : deviceName);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
+
+        return names;
     }
 
     /// <summary>sysfs reports block device sizes in 512-byte sectors regardless of the device's actual

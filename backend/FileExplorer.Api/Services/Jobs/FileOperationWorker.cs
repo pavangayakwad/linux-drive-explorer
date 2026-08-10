@@ -130,16 +130,19 @@ public class FileOperationWorker(
 
         // Directory-tree scanning (Measure/GetUniqueDestination) is offloaded to a pool thread via Task.Run
         // rather than run inline, so a slow/network source mount only occupies a worker for the scan itself
-        // instead of blocking whichever thread happened to pick up this continuation.
+        // instead of blocking whichever thread happened to pick up this continuation. .WaitAsync(ct) on top
+        // means Cancel is honored immediately even if the scan itself is stuck mid-call on an unresponsive
+        // mount - the caller stops waiting right away instead of leaving the Cancel button unresponsive; the
+        // orphaned Task.Run finishes quietly in the background whenever (if ever) the mount answers.
         foreach (var virtualSource in job.GetSourcePaths())
         {
             var physicalSource = pathResolver.ToPhysicalPath(virtualSource);
-            var (items, bytes) = await Task.Run(() => FileTreeOperations.Measure(physicalSource), ct);
+            var (items, bytes) = await Task.Run(() => FileTreeOperations.Measure(physicalSource), ct).WaitAsync(ct);
             totalItems += items;
             totalBytes += bytes;
 
             var name = Path.GetFileName(physicalSource.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            var uniqueDestination = await Task.Run(() => FileTreeOperations.GetUniqueDestination(destinationPhysical, name), ct);
+            var uniqueDestination = await Task.Run(() => FileTreeOperations.GetUniqueDestination(destinationPhysical, name), ct).WaitAsync(ct);
             plan.Add((physicalSource, uniqueDestination));
         }
 
@@ -193,7 +196,7 @@ public class FileOperationWorker(
             // instead of moved.
             if (move)
             {
-                await Task.Run(() => FileTreeOperations.DeleteRecursive(physicalSource, () => { }, ct), ct);
+                await Task.Run(() => FileTreeOperations.DeleteRecursive(physicalSource, () => { }, ct), ct).WaitAsync(ct);
             }
         }
 
@@ -215,7 +218,7 @@ public class FileOperationWorker(
                 () => job.Permanent
                     ? trashService.DeleteForever(virtualSource)
                     : trashService.MoveToTrash(virtualSource, job.CreatedByUserId),
-                ct);
+                ct).WaitAsync(ct);
             if (outcome.PermanentlyDeleted)
             {
                 job.AddPermanentlyDeletedName(outcome.Name);
@@ -263,7 +266,7 @@ public class FileOperationWorker(
                         Directory.Delete(wrapperDir);
                     }
                 }
-            }, ct);
+            }, ct).WaitAsync(ct);
 
             db.TrashItems.Remove(item);
             job.ProcessedItems++;
@@ -295,7 +298,7 @@ public class FileOperationWorker(
         foreach (var virtualSource in job.GetSourcePaths())
         {
             var physicalSource = pathResolver.ToPhysicalPath(virtualSource);
-            var (items, bytes) = await Task.Run(() => FileTreeOperations.Measure(physicalSource), ct);
+            var (items, bytes) = await Task.Run(() => FileTreeOperations.Measure(physicalSource), ct).WaitAsync(ct);
             totalItems += items;
             totalBytes += bytes;
 
@@ -364,17 +367,26 @@ public class FileOperationWorker(
         var entry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
         entry.LastWriteTime = File.GetLastWriteTimeUtc(physicalPath);
 
-        using (var entryStream = entry.Open())
-        await using (var source = new FileStream(physicalPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.SequentialScan | FileOptions.Asynchronous))
+        var entryStream = entry.Open();
+        var source = new FileStream(physicalPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.SequentialScan | FileOptions.Asynchronous);
+        try
         {
             var buffer = new byte[1024 * 1024];
             int read;
-            while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+            // Stall-guarded the same way as the plain copy path: a source file on an unresponsive/disconnected
+            // mount can't be allowed to block Cancel forever, and disposing entryStream/source normally on that
+            // path could itself hang mid-flush - see FileTreeOperations.GuardAsync/DisposeQuietlyAsync.
+            while ((read = await FileTreeOperations.GuardAsync(source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct), physicalPath, ct)) > 0)
             {
-                await entryStream.WriteAsync(buffer.AsMemory(0, read), ct);
+                await FileTreeOperations.GuardAsync(entryStream.WriteAsync(buffer.AsMemory(0, read), ct), physicalPath, ct);
                 job.ProcessedBytes += read;
                 await report(false);
             }
+        }
+        finally
+        {
+            _ = FileTreeOperations.DisposeQuietlyAsync(source);
+            _ = FileTreeOperations.DisposeQuietlyAsync(entryStream);
         }
 
         job.ProcessedItems++;
