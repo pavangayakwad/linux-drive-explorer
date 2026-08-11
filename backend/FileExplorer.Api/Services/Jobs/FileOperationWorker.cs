@@ -124,7 +124,7 @@ public class FileOperationWorker(
         var destinationPhysical = pathResolver.ToPhysicalPath(job.DestinationPath!);
         Directory.CreateDirectory(destinationPhysical);
 
-        var plan = new List<(string PhysicalSource, string PhysicalDestination)>();
+        var plan = new List<(string PhysicalSource, string PhysicalDestination, int ItemCount, long ByteCount)>();
         long totalBytes = 0;
         var totalItems = 0;
 
@@ -143,7 +143,7 @@ public class FileOperationWorker(
 
             var name = Path.GetFileName(physicalSource.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
             var uniqueDestination = await Task.Run(() => FileTreeOperations.GetUniqueDestination(destinationPhysical, name), ct).WaitAsync(ct);
-            plan.Add((physicalSource, uniqueDestination));
+            plan.Add((physicalSource, uniqueDestination, items, bytes));
         }
 
         job.TotalItems = totalItems;
@@ -172,9 +172,23 @@ public class FileOperationWorker(
 
         await Report(force: true);
 
-        foreach (var (physicalSource, physicalDestination) in plan)
+        foreach (var (physicalSource, physicalDestination, itemCount, byteCount) in plan)
         {
             job.CurrentItem = pathResolver.ToVirtualPath(physicalSource);
+
+            // A move within the same filesystem/mount is just a directory-entry rename - the OS repoints
+            // it in O(1) regardless of how large the tree is, with no data actually touched (this is what
+            // makes "mv" on Linux instant). Try that first and only fall back to the byte-for-byte copy +
+            // delete below when it's not possible, e.g. a genuine cross-device move (EXDEV) between two
+            // different mounted drives.
+            if (move && await TryFastRenameAsync(physicalSource, physicalDestination, ct))
+            {
+                job.ProcessedItems += itemCount;
+                job.ProcessedBytes += byteCount;
+                await Report(force: false);
+                continue;
+            }
+
             await FileTreeOperations.CopyRecursiveAsync(
                 physicalSource,
                 physicalDestination,
@@ -201,6 +215,38 @@ public class FileOperationWorker(
         }
 
         await Report(force: true);
+    }
+
+    /// <summary>Attempts an in-place rename (File.Move/Directory.Move) instead of copy+delete. Never throws -
+    /// returns false on any failure (e.g. source and destination live on different filesystems) so the caller
+    /// falls back to the slow path.</summary>
+    private static async Task<bool> TryFastRenameAsync(string physicalSource, string physicalDestination, CancellationToken ct)
+    {
+        try
+        {
+            return await Task.Run(() =>
+            {
+                if (File.Exists(physicalSource))
+                {
+                    File.Move(physicalSource, physicalDestination);
+                    return true;
+                }
+                if (Directory.Exists(physicalSource))
+                {
+                    Directory.Move(physicalSource, physicalDestination);
+                    return true;
+                }
+                return false;
+            }, ct).WaitAsync(ct);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private async Task ExecuteDeleteAsync(FileOperationJob job, AppDbContext db, ITrashService trashService, CancellationToken ct)
