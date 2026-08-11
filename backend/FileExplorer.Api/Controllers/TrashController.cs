@@ -1,11 +1,13 @@
 using System.Security.Claims;
 using FileExplorer.Api.Data;
+using FileExplorer.Api.Hubs;
 using FileExplorer.Api.Models.Dtos;
 using FileExplorer.Api.Models.Entities;
 using FileExplorer.Api.Services;
 using FileExplorer.Api.Services.Jobs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace FileExplorer.Api.Controllers;
@@ -13,7 +15,7 @@ namespace FileExplorer.Api.Controllers;
 [Authorize]
 [ApiController]
 [Route("api/trash")]
-public class TrashController(AppDbContext db, ITrashService trashService, IJobQueue queue) : ControllerBase
+public class TrashController(AppDbContext db, ITrashService trashService, IJobQueue queue, IHubContext<TasksHub> hub) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<TrashItemDto>>> List(CancellationToken ct)
@@ -77,6 +79,7 @@ public class TrashController(AppDbContext db, ITrashService trashService, IJobQu
         db.FileOperationJobs.Add(job);
         await db.SaveChangesAsync(ct);
         await queue.EnqueueAsync(job.Id, ct);
+        await hub.Clients.All.SendAsync("jobUpdated", JobDto.FromEntity(job), ct);
 
         return Accepted(new { jobId = job.Id });
     }

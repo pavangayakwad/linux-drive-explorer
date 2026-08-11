@@ -1,7 +1,10 @@
 using FileExplorer.Api.Data;
+using FileExplorer.Api.Hubs;
+using FileExplorer.Api.Models.Dtos;
 using FileExplorer.Api.Models.Entities;
 using FileExplorer.Api.Options;
 using FileExplorer.Api.Services.Jobs;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 
 namespace FileExplorer.Api.Services;
@@ -11,6 +14,7 @@ public class FileOperationsService(
     IJobQueue queue,
     IPathResolver pathResolver,
     IMountLocator mountLocator,
+    IHubContext<TasksHub> hub,
     IOptions<FileSystemOptions> fsOptions) : IFileOperationsService
 {
     // Extra headroom on top of the archive's estimated (uncompressed) size, for the zip's own central directory
@@ -70,6 +74,11 @@ public class FileOperationsService(
         db.FileOperationJobs.Add(job);
         await db.SaveChangesAsync(ct);
         await queue.EnqueueAsync(job.Id, ct);
+
+        // Broadcast the freshly-queued job immediately - the worker only broadcasts once it
+        // actually picks the job up, which could be a while if the queue is backed up (max 2
+        // concurrent). Without this, clients' running-task counts miss jobs still waiting in line.
+        await hub.Clients.All.SendAsync("jobUpdated", JobDto.FromEntity(job), ct);
 
         return job.Id;
     }
