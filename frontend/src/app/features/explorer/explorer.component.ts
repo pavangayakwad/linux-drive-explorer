@@ -751,6 +751,8 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       { label: 'Delete', icon: 'pi pi-trash', command: () => this.confirmDelete() },
       { separator: true },
       { label: 'Properties', icon: 'pi pi-info-circle', command: () => this.openProperties() },
+      { separator: true },
+      { label: 'Refresh', icon: 'pi pi-refresh', command: () => this.refresh() },
     );
     return items;
   }
@@ -764,6 +766,8 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       { separator: true },
       { label: 'Upload files', icon: 'pi pi-upload', command: () => this.openUploadFilesPicker() },
       { label: 'Upload folder', icon: 'pi pi-cloud-upload', command: () => this.openUploadFolderPicker() },
+      { separator: true },
+      { label: 'Refresh', icon: 'pi pi-refresh', command: () => this.refresh() },
     ];
   }
 
