@@ -1051,7 +1051,20 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     }
 
     if (selected.length === 1 && !selected[0].isDirectory) {
-      await downloadBlob('/files/download', { path: selected[0].path }, selected[0].name);
+      // Fetching a large file as a blob takes a while before the browser's save dialog appears,
+      // so keep this toast up for the whole wait rather than letting it look like nothing happened.
+      this.messageService.add({
+        key: 'download',
+        severity: 'info',
+        summary: 'Preparing download',
+        detail: 'Your download will begin shortly...',
+        sticky: true,
+      });
+      try {
+        await downloadBlob('/files/download', { path: selected[0].path }, selected[0].name);
+      } finally {
+        this.messageService.clear('download');
+      }
       return;
     }
 
