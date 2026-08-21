@@ -81,8 +81,9 @@ the dev API runs on whatever OS you're developing on, not necessarily Linux.
 ```
 backend/FileExplorer.Api/   ASP.NET Core 10 Web API, EF Core + SQLite, SignalR
 frontend/                   Angular (standalone + signals) + PrimeNG, axios for HTTP
-docker-compose.yml           two containers: api (Kestrel) + web (nginx serving the
-                             built Angular app and reverse-proxying /api and /hubs)
+Dockerfile                  single container: Kestrel serves the built Angular app
+                             (from wwwroot) alongside the API and SignalR hub, all on
+                             one process/port — see docker-compose.yml
 ```
 
 The API treats one configured physical directory as its "root" (`FileSystem:RootPath`,
@@ -93,7 +94,7 @@ host's real `/` is bind-mounted there, so the API can reach anything the host ca
 the host. Treat it accordingly: keep it off the public internet, put it behind a
 trusted network/VPN, and always set a strong `JWT_KEY` and admin password (see below).
 
-Mounting/unmounting removable drives from the UI goes a step further: the `api`
+Mounting/unmounting removable drives from the UI goes a step further: the `app`
 container runs `privileged: true` with `pid: host` (see `docker-compose.yml`) so it can
 run `nsenter --target 1 ...` and execute `mount`/`umount` inside the *host's* own
 namespaces — a mount issued from inside an unprivileged container's own namespace would
@@ -103,9 +104,10 @@ more strongly. Mount/unmount is restricted server-side to devices under `/mnt` o
 
 ## Quick start with Docker Compose
 
-This is the recommended way to run the app. It builds two containers — `api` (the
-.NET backend) and `web` (nginx serving the built Angular app and proxying `/api` and
-`/hubs` to the API) — wired together by `docker-compose.yml`.
+This is the recommended way to run the app. A single container serves everything:
+Kestrel (the .NET backend) hosts the API and SignalR hub, and also serves the built
+Angular app directly from its `wwwroot` folder — no separate web server or reverse
+proxy in front of it.
 
 **Prerequisites:** Docker Engine + Docker Compose v2 (or Docker Desktop on
 Windows/Mac).
@@ -141,13 +143,13 @@ ADMIN_PASSWORD=
 ### 3. Choose what the app can see
 
 By default, `docker-compose.yml` bind-mounts the **entire host filesystem** (`/`) into
-the `api` container at `/host_root` with `rslave` propagation, so every mount on the
+the `app` container at `/host_root` with `rslave` propagation, so every mount on the
 host — including drives plugged in *after* the container starts — is browsable
 automatically:
 
 ```yaml
 services:
-  api:
+  app:
     volumes:
       - fx-data:/data
       - type: bind
@@ -170,39 +172,39 @@ volumes:
 Whatever you mount, it must appear under `/host_root` inside the container (or update
 `FileSystem__RootPath` to point at a different mount point).
 
-### 4. Build and start the containers
+### 4. Build and start the container
 
 ```bash
 docker compose up -d --build
 ```
 
-This builds the `api` and `web` images and starts both containers in the background.
+This builds the `app` image (Angular + API in one multi-stage build) and starts the
+container in the background.
 
 ### 5. Open the app
 
-Navigate to `http://<host>:8080` (the port `web` is published on in
+Navigate to `http://<host>:7766` (the host port `app` is published on in
 `docker-compose.yml`).
 
 If you left `ADMIN_PASSWORD` blank, fetch the generated password from the logs before
 your first login:
 
 ```bash
-docker compose logs api | grep -A2 "Password:"
+docker compose logs app | grep -A2 "Password:"
 ```
 
 ### 6. Day-to-day operations
 
 ```bash
-docker compose logs -f api      # tail API logs
-docker compose logs -f web      # tail nginx logs
-docker compose restart api      # restart just the API
-docker compose down             # stop and remove containers (keeps volumes)
+docker compose logs -f app      # tail logs
+docker compose restart app      # restart the container
+docker compose down             # stop and remove the container (keeps volumes)
 docker compose up -d --build    # rebuild after pulling new code
 ```
 
 ### HTTPS
 
-The `web` container serves plain HTTP. For anything beyond a trusted LAN, put a
+The container serves plain HTTP. For anything beyond a trusted LAN, put a
 TLS-terminating reverse proxy (Caddy, Traefik, or nginx with a certificate) in front of
 it rather than exposing the port directly to the internet.
 
@@ -299,8 +301,8 @@ netsh interface ipv4 show excludedportrange protocol=tcp
 ```
 
 If 8080 falls in a listed range, either restart Windows (ranges are reassigned on
-reboot) or just map `web` to a different, free host port in `docker-compose.yml`
-(e.g. `"9500:80"`).
+reboot) or just map `app` to a different, free host port in `docker-compose.yml`
+(e.g. `"9500:8080"`).
 
 ## Project layout reference
 

@@ -1,8 +1,8 @@
 services:
-  api:
+  app:
     build:
-      context: ./backend/FileExplorer.Api
-    container_name: file-explorer-api
+      context: .
+    container_name: file-explorer
     restart: unless-stopped
     # Required for the mount/unmount feature: the API shells out to `nsenter --target 1 ...` to run
     # mount/umount inside the host's own namespaces (PID 1's), since a plain `mount` here would only
@@ -17,6 +17,8 @@ services:
       Admin__Username: ${ADMIN_USERNAME:-admin}
       # Leave ADMIN_PASSWORD unset on first run to get a random password logged once at startup.
       Admin__Password: ${ADMIN_PASSWORD:-admin}
+    ports:
+      - "7766:8080"
     volumes:
       - fx-data:/data
       # Bind-mounts the whole host filesystem in as the app's "root". `rslave` propagation
@@ -29,16 +31,6 @@ services:
         target: /host_root
         bind:
           propagation: rslave
-
-  web:
-    build:
-      context: ./frontend
-    container_name: file-explorer-web
-    restart: unless-stopped
-    ports:
-      - "7766:80"
-    depends_on:
-      - api
 
 volumes:
   fx-data:

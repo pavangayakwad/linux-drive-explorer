@@ -133,10 +133,15 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.UseCors("Default");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<TasksHub>("/hubs/tasks");
+// Any GET that doesn't match an API/hub route falls through to the Angular SPA, which
+// owns client-side routing from here.
+app.MapFallbackToFile("index.html");
 
 app.Run();

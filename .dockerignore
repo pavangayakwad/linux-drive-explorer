@@ -1,0 +1,17 @@
+.git/
+.serena/
+docs/
+marketing/
+website/
+README.md
+
+backend/**/bin/
+backend/**/obj/
+backend/**/*.db
+backend/**/*.db-shm
+backend/**/*.db-wal
+backend/.devroot/
+
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
