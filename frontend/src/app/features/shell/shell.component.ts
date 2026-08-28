@@ -137,8 +137,12 @@ export class ShellComponent implements OnInit, OnDestroy {
   async unmountDrive(mountPath: string): Promise<void> {
     this.unmountingPath.set(mountPath);
     try {
+      const wasBrowsingUnmountedDrive = this.driveNavState.mountPathFor(this.currentPath()) === mountPath;
       await this.drivesService.unmount(mountPath);
       await this.refreshDrives();
+      if (wasBrowsingUnmountedDrive) {
+        void this.router.navigate(['/'], { queryParams: { path: '/' } });
+      }
     } catch (error) {
       this.messageService.add({ severity: 'error', summary: 'Unmount failed', detail: this.extractError(error) });
     } finally {
