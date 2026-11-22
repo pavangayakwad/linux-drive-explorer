@@ -124,31 +124,12 @@ public class FileOperationWorker(
         var destinationPhysical = pathResolver.ToPhysicalPath(job.DestinationPath!);
         Directory.CreateDirectory(destinationPhysical);
 
-        var plan = new List<(string PhysicalSource, string PhysicalDestination, int ItemCount, long ByteCount)>();
-        long totalBytes = 0;
-        var totalItems = 0;
+        var sources = job.GetSourcePaths();
 
-        // Directory-tree scanning (Measure/GetUniqueDestination) is offloaded to a pool thread via Task.Run
-        // rather than run inline, so a slow/network source mount only occupies a worker for the scan itself
-        // instead of blocking whichever thread happened to pick up this continuation. .WaitAsync(ct) on top
-        // means Cancel is honored immediately even if the scan itself is stuck mid-call on an unresponsive
-        // mount - the caller stops waiting right away instead of leaving the Cancel button unresponsive; the
-        // orphaned Task.Run finishes quietly in the background whenever (if ever) the mount answers.
-        foreach (var virtualSource in job.GetSourcePaths())
-        {
-            var physicalSource = pathResolver.ToPhysicalPath(virtualSource);
-            var (items, bytes) = await Task.Run(() => FileTreeOperations.Measure(physicalSource), ct).WaitAsync(ct);
-            totalItems += items;
-            totalBytes += bytes;
+        // Sources that still have to be transferred byte for byte: every source of a copy job, plus the
+        // sources of a move that the OS wouldn't just rename (a genuine cross-device move, EXDEV).
+        var copyPlan = new List<(string PhysicalSource, string PhysicalDestination)>();
 
-            var name = Path.GetFileName(physicalSource.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            var uniqueDestination = await Task.Run(() => FileTreeOperations.GetUniqueDestination(destinationPhysical, name), ct).WaitAsync(ct);
-            plan.Add((physicalSource, uniqueDestination, items, bytes));
-        }
-
-        job.TotalItems = totalItems;
-        job.TotalBytes = totalBytes;
-        var reportEvery = Math.Max(1, totalItems / 50);
         var lastReported = 0;
         var lastReportedAt = DateTime.UtcNow;
         var reportInterval = TimeSpan.FromMilliseconds(500);
@@ -156,9 +137,12 @@ public class FileOperationWorker(
         // Item-count throttling alone leaves a single large file's progress bar frozen at 0% for its whole
         // copy (ProcessedItems only increments once the file finishes) - a time-based fallback keeps
         // mid-file byte progress flowing to the UI without flooding SignalR on every chunk.
+        // reportEvery is read from the totals as they currently stand rather than computed once up front,
+        // because a move job discovers its work source by source instead of in one up-front scan.
         async Task Report(bool force)
         {
             var now = DateTime.UtcNow;
+            var reportEvery = Math.Max(1, job.TotalItems / 50);
             var itemThresholdMet = job.ProcessedItems - lastReported >= reportEvery;
             if (!force && !itemThresholdMet && now - lastReportedAt < reportInterval)
             {
@@ -170,24 +154,92 @@ public class FileOperationWorker(
             await BroadcastAsync(job, ct);
         }
 
-        await Report(force: true);
+        if (move)
+        {
+            // A move inside one filesystem is a single directory-entry rename per top-level item - O(1) no
+            // matter how deep the tree under it is - so there is nothing to measure before it happens.
+            // Scanning every source tree up front just to have numbers to display meant such a move spent
+            // its entire runtime inside the scan with the Tasks bar pinned at "0/0 items, 0%", and then
+            // snapped straight to 100%: the scan was the only slow part of the job, and it reported no
+            // progress at all (and did no work either). A move now counts one unit of work per file/folder
+            // the user asked to move, renames them one at a time, and broadcasts after each one, so the bar
+            // tracks what has actually been relocated from the first item onwards.
+            job.TotalItems = sources.Count;
+            await Report(force: true);
 
-        foreach (var (physicalSource, physicalDestination, itemCount, byteCount) in plan)
+            foreach (var virtualSource in sources)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var physicalSource = pathResolver.ToPhysicalPath(virtualSource);
+                job.CurrentItem = pathResolver.ToVirtualPath(physicalSource);
+
+                // Directory-tree work (GetUniqueDestination stats candidate names) is offloaded to a pool
+                // thread via Task.Run rather than run inline, so a slow/network source mount only occupies a
+                // worker for the call itself. .WaitAsync(ct) on top means Cancel is honored immediately even
+                // if the call is stuck mid-flight on an unresponsive mount - the caller stops waiting right
+                // away instead of leaving the Cancel button unresponsive, and the orphaned Task.Run finishes
+                // quietly in the background whenever (if ever) the mount answers.
+                var uniqueDestination = await Task.Run(() => FileTreeOperations.GetUniqueDestination(destinationPhysical, ItemName(physicalSource)), ct).WaitAsync(ct);
+
+                // The OS repoints the entry in O(1) regardless of how large the tree is, with no data
+                // actually touched (this is what makes "mv" on Linux instant). Only fall back to the
+                // byte-for-byte copy + delete below when it isn't possible.
+                if (await TryFastRenameAsync(physicalSource, uniqueDestination, ct))
+                {
+                    job.ProcessedItems++;
+                    // Not forced: a "move 10,000 selected files on the same disk" job renames them faster
+                    // than a save-and-broadcast each, and the ~2%-of-items threshold already keeps the bar live.
+                    await Report(force: false);
+                    continue;
+                }
+
+                copyPlan.Add((physicalSource, uniqueDestination));
+            }
+
+            // What the OS wouldn't rename has to be copied, and a byte-driven bar needs the sizes, so those
+            // sources are measured here - after the renames have already put real movement on screen. Their
+            // items are deliberately not added to TotalItems: for a move, one item only counts as done once
+            // it has been copied *and* removed from where it was, which is when that move is actually over.
+            foreach (var (physicalSource, _) in copyPlan)
+            {
+                ct.ThrowIfCancellationRequested();
+                job.CurrentItem = pathResolver.ToVirtualPath(physicalSource);
+
+                var (_, bytes) = await Task.Run(() => FileTreeOperations.Measure(physicalSource), ct).WaitAsync(ct);
+                job.TotalBytes += bytes;
+                await Report(force: true);
+            }
+        }
+        else
+        {
+            // Copy: there is no shortcut, so every source has to be transferred and its size is worth
+            // knowing before the transfer starts - the byte totals are what make a long copy's bar move.
+            var totalBytes = 0L;
+            var totalItems = 0;
+
+            foreach (var virtualSource in sources)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var physicalSource = pathResolver.ToPhysicalPath(virtualSource);
+                var (items, bytes) = await Task.Run(() => FileTreeOperations.Measure(physicalSource), ct).WaitAsync(ct);
+                totalItems += items;
+                totalBytes += bytes;
+
+                var uniqueDestination = await Task.Run(() => FileTreeOperations.GetUniqueDestination(destinationPhysical, ItemName(physicalSource)), ct).WaitAsync(ct);
+                copyPlan.Add((physicalSource, uniqueDestination));
+            }
+
+            job.TotalItems = totalItems;
+            job.TotalBytes = totalBytes;
+            await Report(force: true);
+        }
+
+        foreach (var (physicalSource, physicalDestination) in copyPlan)
         {
             job.CurrentItem = pathResolver.ToVirtualPath(physicalSource);
-
-            // A move within the same filesystem/mount is just a directory-entry rename - the OS repoints
-            // it in O(1) regardless of how large the tree is, with no data actually touched (this is what
-            // makes "mv" on Linux instant). Try that first and only fall back to the byte-for-byte copy +
-            // delete below when it's not possible, e.g. a genuine cross-device move (EXDEV) between two
-            // different mounted drives.
-            if (move && await TryFastRenameAsync(physicalSource, physicalDestination, ct))
-            {
-                job.ProcessedItems += itemCount;
-                job.ProcessedBytes += byteCount;
-                await Report(force: false);
-                continue;
-            }
+            await Report(force: true);
 
             await FileTreeOperations.CopyRecursiveAsync(
                 physicalSource,
@@ -199,7 +251,13 @@ public class FileOperationWorker(
                 },
                 async () =>
                 {
-                    job.ProcessedItems++;
+                    // Only a copy job counts the individual files and folders inside a tree. A move job
+                    // reports per top-level item, which is not done until the item has left its original
+                    // location too.
+                    if (!move)
+                    {
+                        job.ProcessedItems++;
+                    }
                     await Report(force: false);
                 },
                 ct);
@@ -211,11 +269,18 @@ public class FileOperationWorker(
             if (move)
             {
                 await Task.Run(() => FileTreeOperations.DeleteRecursive(physicalSource, () => { }, ct), ct).WaitAsync(ct);
+
+                // The item only counts as moved once it is off the source as well as on the destination.
+                job.ProcessedItems++;
+                await Report(force: true);
             }
         }
 
         await Report(force: true);
     }
+
+    private static string ItemName(string physicalPath) =>
+        Path.GetFileName(physicalPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 
     /// <summary>Attempts an in-place rename (File.Move/Directory.Move) instead of copy+delete. Never throws -
     /// returns false on any failure (e.g. source and destination live on different filesystems) so the caller
