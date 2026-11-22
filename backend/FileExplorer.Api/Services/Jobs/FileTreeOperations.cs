@@ -247,4 +247,72 @@ public static class FileTreeOperations
             return 0;
         }
     }
+
+    /// <summary>Determines whether two paths live under the same mounted filesystem, by matching each against
+    /// /proc/mounts and comparing the longest matching mount point. This exists so the fast-rename attempt in
+    /// FileOperationWorker can be skipped entirely for a cross-device move: Directory.Move fails immediately on
+    /// a cross-device EXDEV, but File.Move on Linux silently falls back to a full blocking byte-for-byte copy
+    /// when crossing devices - one that reports no progress, can't be cancelled, and isn't stall-guarded, unlike
+    /// CopyRecursiveAsync above. A move between two different mounted drives (e.g. two separate /mnt volumes)
+    /// would otherwise sit at 0 processed items/bytes for the entire transfer even though the data is genuinely
+    /// moving, because the whole copy happens inside that one opaque File.Move call.
+    ///
+    /// Degrades to true when mount info isn't available (Windows dev, no /proc/mounts) - the previous behavior
+    /// of just attempting the OS rename and falling back to copy on any failure.</summary>
+    public static bool AreOnSameFileSystem(string pathA, string pathB)
+    {
+        var mountPoints = GetMountPoints();
+        if (mountPoints.Count == 0)
+        {
+            return true;
+        }
+
+        return FindMountPoint(pathA, mountPoints) == FindMountPoint(pathB, mountPoints);
+    }
+
+    private static string? FindMountPoint(string path, IReadOnlyList<string> mountPoints)
+    {
+        var normalized = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string? best = null;
+        foreach (var mountPoint in mountPoints)
+        {
+            var isMatch = normalized.Equals(mountPoint, StringComparison.Ordinal)
+                || normalized.StartsWith(mountPoint + "/", StringComparison.Ordinal)
+                || mountPoint == "/";
+            if (!isMatch || (best is not null && mountPoint.Length <= best.Length))
+            {
+                continue;
+            }
+            best = mountPoint;
+        }
+        return best;
+    }
+
+    private static IReadOnlyList<string> GetMountPoints()
+    {
+        if (!OperatingSystem.IsLinux() || !File.Exists("/proc/mounts"))
+        {
+            return [];
+        }
+
+        try
+        {
+            return File.ReadLines("/proc/mounts")
+                .Select(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                .Where(fields => fields.Length >= 2)
+                .Select(fields =>
+                {
+                    var mountPoint = UnescapeMountField(fields[1]).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    return mountPoint.Length == 0 ? "/" : mountPoint;
+                })
+                .ToList();
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+    }
+
+    private static string UnescapeMountField(string field) =>
+        field.Replace("\\040", " ").Replace("\\011", "\t").Replace("\\012", "\n").Replace("\\134", "\\");
 }

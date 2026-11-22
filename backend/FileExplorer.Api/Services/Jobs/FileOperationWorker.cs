@@ -222,6 +222,15 @@ public class FileOperationWorker(
     /// falls back to the slow path.</summary>
     private static async Task<bool> TryFastRenameAsync(string physicalSource, string physicalDestination, CancellationToken ct)
     {
+        // Checked up front rather than just letting File.Move fail: Directory.Move fails immediately on a
+        // cross-device EXDEV, but File.Move on Linux silently absorbs it by doing a full blocking
+        // byte-for-byte copy internally with no progress callback, no cancellation, and no stall detection -
+        // see FileTreeOperations.AreOnSameFileSystem for the incident this avoids.
+        if (!FileTreeOperations.AreOnSameFileSystem(physicalSource, physicalDestination))
+        {
+            return false;
+        }
+
         try
         {
             return await Task.Run(() =>
