@@ -20,6 +20,15 @@
   width: 100%;
 }
 
+.preview__hint {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: var(--p-surface-ground, #f3f4f6);
+  color: var(--p-text-muted-color, #6b7280);
+  font-size: 0.85rem;
+}
+
 .preview__text {
   white-space: pre-wrap;
   word-break: break-word;

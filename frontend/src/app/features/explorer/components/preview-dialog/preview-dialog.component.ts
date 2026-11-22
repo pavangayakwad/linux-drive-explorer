@@ -5,16 +5,36 @@ import { DialogModule } from 'primeng/dialog';
 import { MessageModule } from 'primeng/message';
 import { apiClient } from '../../../../core/http/api-client';
 import { FileEntry } from '../../../../core/models/file-system.model';
+import { formatBytes } from '../../../../shared/format.util';
 
 type PreviewKind = 'image' | 'text' | 'pdf' | 'audio' | 'video' | 'unsupported';
 
-const TEXT_EXTENSIONS = new Set([
-  '.txt', '.md', '.log', '.json', '.xml', '.csv', '.yml', '.yaml', '.ts', '.js',
-  '.css', '.html', '.sh', '.cs', '.cshtml', '.sql', '.ini', '.conf', '.gitignore',
-]);
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp']);
-const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg']);
-const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov']);
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.ico', '.tif', '.tiff', '.avif']);
+const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.oga', '.flac', '.m4a', '.aac', '.opus']);
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v', '.ogv']);
+
+/**
+ * Whether the server has said this file is text is a question about its bytes, not about its name -
+ * "caddy", "Dockerfile", "authorized_keys" and ".env.example" carry no useful extension at all, while a
+ * ".txt" that happens to hold a compiled binary is not text either. So the response's content type is the
+ * authority, and the extension is only a fallback for the rare payload served without a usable one.
+ */
+function kindForContentType(contentType: string): PreviewKind | null {
+  if (contentType.startsWith('text/')) return 'text';
+  if (contentType === 'application/pdf') return 'pdf';
+  if (contentType.startsWith('image/')) return 'image';
+  if (contentType.startsWith('audio/')) return 'audio';
+  if (contentType.startsWith('video/')) return 'video';
+  return null;
+}
+
+function kindForExtension(extension: string): PreviewKind {
+  if (extension === '.pdf') return 'pdf';
+  if (IMAGE_EXTENSIONS.has(extension)) return 'image';
+  if (AUDIO_EXTENSIONS.has(extension)) return 'audio';
+  if (VIDEO_EXTENSIONS.has(extension)) return 'video';
+  return 'unsupported';
+}
 
 @Component({
   selector: 'app-preview-dialog',
@@ -33,6 +53,11 @@ export class PreviewDialogComponent implements OnChanges, OnDestroy {
   readonly kind = signal<PreviewKind>('unsupported');
   readonly objectUrl = signal<SafeResourceUrl | null>(null);
   readonly textContent = signal<string>('');
+  /** True when the server sent only the head of a larger text file (see FilesController.Preview). */
+  readonly truncated = signal(false);
+  readonly totalBytes = signal<number | null>(null);
+
+  readonly formatBytes = formatBytes;
 
   private rawObjectUrl: string | null = null;
 
@@ -58,42 +83,38 @@ export class PreviewDialogComponent implements OnChanges, OnDestroy {
       return;
     }
 
-    const extension = (entry.extension ?? '').toLowerCase();
-    const kind = this.resolveKind(extension);
-    this.kind.set(kind);
-
-    if (kind === 'unsupported') {
-      return;
-    }
-
     this.loading.set(true);
     this.errorMessage.set(null);
     try {
-      const { data } = await apiClient.get<Blob>('/files/preview', {
+      const response = await apiClient.get<Blob>('/files/preview', {
         params: { path: entry.path },
         responseType: 'blob',
       });
 
+      const servedType = String(response.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+      const kind = kindForContentType(servedType) ?? kindForExtension((entry.extension ?? '').toLowerCase());
+      this.kind.set(kind);
+
       if (kind === 'text') {
-        this.textContent.set(await data.text());
-      } else {
-        this.rawObjectUrl = URL.createObjectURL(data);
+        this.textContent.set(await response.data.text());
+        this.truncated.set(String(response.headers['x-preview-truncated'] ?? 'false') === 'true');
+        const total = Number(response.headers['x-preview-total-bytes']);
+        this.totalBytes.set(Number.isFinite(total) && total > 0 ? total : null);
+      } else if (kind !== 'unsupported') {
+        this.rawObjectUrl = URL.createObjectURL(response.data);
         this.objectUrl.set(this.sanitizer.bypassSecurityTrustResourceUrl(this.rawObjectUrl));
       }
-    } catch {
-      this.errorMessage.set('Could not load a preview for this file.');
+    } catch (error) {
+      // 415 is the server having read the file and found compiled code, an archive, or media it won't
+      // render inline - that is an ordinary "no preview" answer rather than a failure to load.
+      if ((error as { response?: { status?: number } })?.response?.status === 415) {
+        this.kind.set('unsupported');
+      } else {
+        this.errorMessage.set('Could not load a preview for this file.');
+      }
     } finally {
       this.loading.set(false);
     }
-  }
-
-  private resolveKind(extension: string): PreviewKind {
-    if (TEXT_EXTENSIONS.has(extension)) return 'text';
-    if (IMAGE_EXTENSIONS.has(extension)) return 'image';
-    if (extension === '.pdf') return 'pdf';
-    if (AUDIO_EXTENSIONS.has(extension)) return 'audio';
-    if (VIDEO_EXTENSIONS.has(extension)) return 'video';
-    return 'unsupported';
   }
 
   private cleanup(): void {
@@ -103,7 +124,10 @@ export class PreviewDialogComponent implements OnChanges, OnDestroy {
     }
     this.objectUrl.set(null);
     this.textContent.set('');
+    this.truncated.set(false);
+    this.totalBytes.set(null);
     this.errorMessage.set(null);
+    this.kind.set('unsupported');
   }
 
   close(): void {

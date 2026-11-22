@@ -25,10 +25,18 @@
         <video [src]="objectUrl()" controls class="preview__media"></video>
       }
       @case ('text') {
+        @if (truncated()) {
+          <div class="preview__hint">
+            Showing the beginning of this file — it is {{ formatBytes(totalBytes() ?? 0) }} in total.
+            Use Download from the row's right-click menu to read all of it.
+          </div>
+        }
         <pre class="preview__text">{{ textContent() }}</pre>
       }
       @default {
-        <div class="preview__status">No preview available for this file type.</div>
+        <div class="preview__status">
+          No preview available — this file is neither text, image, audio, video, nor PDF.
+        </div>
       }
     }
   }

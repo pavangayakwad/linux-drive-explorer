@@ -98,7 +98,10 @@ builder.Services.AddCors(options =>
     {
         if (allowedOrigins.Length > 0)
         {
-            policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
+            // The preview truncation markers are read by the preview dialog to tell the user it is looking
+            // at the head of a larger file, so they have to survive a cross-origin (dev-server) response.
+            policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod().AllowCredentials()
+                .WithExposedHeaders("X-Preview-Truncated", "X-Preview-Total-Bytes");
         }
     });
 });

@@ -28,11 +28,9 @@ public class FilesController(
 {
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
 
-    private static readonly HashSet<string> PreviewableTextExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".txt", ".md", ".log", ".json", ".xml", ".csv", ".yml", ".yaml", ".ts", ".js",
-        ".css", ".html", ".sh", ".cs", ".cshtml", ".sql", ".ini", ".conf", ".gitignore",
-    };
+    /// <summary>Most of a text file the preview dialog will ever usefully show. Anything past this is
+    /// reported to the client as truncated instead of being rendered.</summary>
+    private const int MaxTextPreviewBytes = 512 * 1024;
 
     [HttpGet("list")]
     public ActionResult<DirectoryListingDto> List([FromQuery] string path = "/")
@@ -126,7 +124,7 @@ public class FilesController(
         directorySizeService.Cancel(jobId) ? NoContent() : NotFound();
 
     [HttpGet("preview")]
-    public IActionResult Preview([FromQuery] string path)
+    public async Task<IActionResult> Preview([FromQuery] string path, CancellationToken ct)
     {
         string physical;
         try
@@ -143,15 +141,28 @@ public class FilesController(
             return NotFound(new { message = $"'{path}' was not found." });
         }
 
-        var extension = Path.GetExtension(physical);
-        var contentType = ResolvePreviewContentType(physical, extension);
+        var contentType = await ResolvePreviewContentTypeAsync(physical, ct);
         if (contentType is null)
         {
-            return StatusCode(StatusCodes.Status415UnsupportedMediaType, new { message = "Preview is not supported for this file type." });
+            return StatusCode(StatusCodes.Status415UnsupportedMediaType, new { message = "Preview is not supported for this file type - its content is neither text, image, audio, video, nor PDF." });
         }
 
-        var stream = System.IO.File.OpenRead(physical);
-        return File(stream, contentType, enableRangeProcessing: true);
+        if (contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase))
+        {
+            // A text preview is handed to the browser as a blob that gets dropped straight into a <pre>, so
+            // streaming a whole multi-gigabyte log through it would freeze the tab. The head of the file is
+            // enough to read, and the two headers below are what let the dialog say "showing the first
+            // part of a larger file" rather than quietly pretending the text ended mid-sentence.
+            await using var stream = new FileStream(physical, FileMode.Open, FileAccess.Read, FileShare.Read, MaxTextPreviewBytes, FileOptions.SequentialScan | FileOptions.Asynchronous);
+            var buffer = new byte[MaxTextPreviewBytes];
+            var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
+
+            Response.Headers["X-Preview-Truncated"] = read < stream.Length ? "true" : "false";
+            Response.Headers["X-Preview-Total-Bytes"] = stream.Length.ToString();
+            return File(buffer[..read], contentType);
+        }
+
+        return File(System.IO.File.OpenRead(physical), contentType, enableRangeProcessing: true);
     }
 
     [HttpGet("download")]
@@ -401,12 +412,14 @@ public class FilesController(
         }
     }
 
-    private static string? ResolvePreviewContentType(string physicalPath, string extension)
+    /// <summary>Picks the content type the preview dialog should get, or null when the file has nothing
+    /// previewable in it. Media and PDF stay extension-driven because the dialog has to choose a matching
+    /// browser element (img/audio/video/iframe) and only a recognised media type can actually be played;
+    /// everything else is decided as text-or-not by name first and then by reading its bytes, so
+    /// extension-less files like "Dockerfile", "caddy" or "authorized_keys" preview correctly too.</summary>
+    private static async Task<string?> ResolvePreviewContentTypeAsync(string physicalPath, CancellationToken ct)
     {
-        if (PreviewableTextExtensions.Contains(extension))
-        {
-            return "text/plain; charset=utf-8";
-        }
+        var extension = Path.GetExtension(physicalPath);
 
         if (extension.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
         {
@@ -421,6 +434,17 @@ public class FilesController(
             return contentType;
         }
 
-        return null;
+        if (FileContentInspector.HasKnownTextExtension(extension) ||
+            FileContentInspector.HasKnownTextFileName(Path.GetFileName(physicalPath)))
+        {
+            return "text/plain; charset=utf-8";
+        }
+
+        if (FileContentInspector.HasKnownBinaryExtension(extension))
+        {
+            return null;
+        }
+
+        return await FileContentInspector.LooksLikeTextAsync(physicalPath, ct) ? "text/plain; charset=utf-8" : null;
     }
 }
