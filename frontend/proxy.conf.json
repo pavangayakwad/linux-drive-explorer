@@ -3,6 +3,11 @@
     "target": "http://localhost:5266",
     "secure": false
   },
+  "/ws": {
+    "target": "http://localhost:5266",
+    "secure": false,
+    "ws": true
+  },
   "/hubs": {
     "target": "http://localhost:5266",
     "secure": false,

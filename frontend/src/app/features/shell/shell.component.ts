@@ -12,6 +12,7 @@ import { Job } from '../../core/models/job.model';
 import { tokenStore } from '../../core/http/token-store';
 import { TasksService } from '../../core/services/tasks.service';
 import { SidebarComponent } from '../../shared/components/sidebar/sidebar.component';
+import { TerminalComponent } from '../../shared/components/terminal/terminal.component';
 import { UploadProgressPanelComponent } from '../../shared/components/upload-progress-panel/upload-progress-panel.component';
 
 const ACTIVE_JOB_STATUSES: ReadonlySet<Job['status']> = new Set(['Queued', 'Running']);
@@ -34,7 +35,7 @@ function sortDrivesByFreeSpace(drives: DriveSummary[]): DriveSummary[] {
 @Component({
   selector: 'app-shell',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, SidebarComponent, UploadProgressPanelComponent],
+  imports: [CommonModule, RouterOutlet, SidebarComponent, TerminalComponent, UploadProgressPanelComponent],
   templateUrl: './shell.component.html',
   styleUrl: './shell.component.scss',
 })
@@ -60,6 +61,10 @@ export class ShellComponent implements OnInit, OnDestroy {
   readonly unmountingPath = signal<string | null>(null);
   readonly sidebarWidth = signal(this.loadStoredWidth());
   readonly runningTaskCount = signal(0);
+  /** Directory the terminal was opened in; null while closed. Captured once on open so later
+   * explorer navigation doesn't move it. */
+  readonly terminalPath = signal<string | null>(null);
+  readonly terminalHeight = signal(0);
 
   private readonly url = toSignal(
     this.router.events.pipe(
@@ -244,6 +249,39 @@ export class ShellComponent implements OnInit, OnDestroy {
       }
     }
     this.runningTaskCount.set(count);
+  }
+
+  toggleTerminal(): void {
+    if (this.terminalPath() !== null) {
+      this.terminalPath.set(null);
+      return;
+    }
+    // Default to half of the content area; the user can drag the splitter afterwards.
+    const mainHeight = document.querySelector('.shell__main')?.clientHeight ?? window.innerHeight;
+    this.terminalHeight.set(Math.round(mainHeight / 2));
+    this.terminalPath.set(this.currentPath() || '/');
+  }
+
+  startTerminalResize(event: MouseEvent): void {
+    event.preventDefault();
+    const main = document.querySelector('.shell__main');
+    const mainHeight = main?.clientHeight ?? window.innerHeight;
+    const mainBottom = main?.getBoundingClientRect().bottom ?? window.innerHeight;
+    // Full-page overlay so the terminal canvas can't swallow mouse events mid-drag.
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;cursor:row-resize';
+    document.body.appendChild(overlay);
+
+    const onMove = (e: MouseEvent) => {
+      this.terminalHeight.set(Math.min(mainHeight - 120, Math.max(100, mainBottom - e.clientY)));
+    };
+    const onUp = () => {
+      overlay.remove();
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   }
 
   onNavigate(path: string): void {

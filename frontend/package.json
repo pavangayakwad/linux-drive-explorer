@@ -23,6 +23,8 @@
     "@fontsource/cascadia-code": "^5.3.0",
     "@microsoft/signalr": "^10.0.0",
     "@primeuix/themes": "^2.0.3",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "axios": "^1.18.1",
     "primeicons": "^8.0.0",
     "primeng": "^21.1.9",

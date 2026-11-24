@@ -34,6 +34,7 @@
               "node_modules/@fontsource/cascadia-code/400.css",
               "node_modules/@fontsource/cascadia-code/600.css",
               "node_modules/primeicons/primeicons.css",
+              "node_modules/@xterm/xterm/css/xterm.css",
               "src/styles.scss"
             ]
           },

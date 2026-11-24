@@ -44,6 +44,8 @@ export class SidebarComponent {
   @Input() mountingDevice: string | null = null;
   @Input() unmountingPath: string | null = null;
   @Input() runningTaskCount = 0;
+  @Input() terminalOpen = false;
+  @Output() readonly toggleTerminal = new EventEmitter<void>();
   @Output() readonly navigate = new EventEmitter<string>();
   @Output() readonly refreshDrives = new EventEmitter<void>();
   @Output() readonly mountDevice = new EventEmitter<string>();

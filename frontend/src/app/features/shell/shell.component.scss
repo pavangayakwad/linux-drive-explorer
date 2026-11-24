@@ -36,7 +36,32 @@
 }
 
 .shell__main {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   height: 100%;
+  overflow: hidden;
+}
+
+.shell__content {
+  flex: 1 1 0;
+  min-height: 0;
   overflow: auto;
+}
+
+.shell__vresizer {
+  flex: none;
+  height: 5px;
+  cursor: row-resize;
+  background: var(--p-content-border-color, #e5e7eb);
+
+  &:hover,
+  &:active {
+    background: var(--p-primary-color, #6366f1);
+  }
+}
+
+.shell__terminal {
+  flex: none;
+  min-height: 0;
 }

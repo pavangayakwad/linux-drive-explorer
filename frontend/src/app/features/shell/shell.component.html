@@ -8,6 +8,8 @@
     [mountingDevice]="mountingDevice()"
     [unmountingPath]="unmountingPath()"
     [runningTaskCount]="runningTaskCount()"
+    [terminalOpen]="terminalPath() !== null"
+    (toggleTerminal)="toggleTerminal()"
     (navigate)="onNavigate($event)"
     (refreshDrives)="refreshDrives()"
     (mountDevice)="mountDevice($event)"
@@ -15,7 +17,15 @@
   />
   <div class="shell__resizer" (mousedown)="startResize($event)"></div>
   <div class="shell__main">
-    <router-outlet />
+    <div class="shell__content">
+      <router-outlet />
+    </div>
+    @if (terminalPath() !== null) {
+      <div class="shell__vresizer" (mousedown)="startTerminalResize($event)"></div>
+      <div class="shell__terminal" [style.height.px]="terminalHeight()">
+        <app-terminal [path]="terminalPath()!" (closed)="terminalPath.set(null)" />
+      </div>
+    }
   </div>
 </div>
 

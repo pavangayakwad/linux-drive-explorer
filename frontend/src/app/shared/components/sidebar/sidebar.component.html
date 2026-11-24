@@ -83,6 +83,10 @@
 
   <span class="sidebar__spacer"></span>
 
+  <button type="button" class="sidebar__item" [class.sidebar__item--active]="terminalOpen" (click)="toggleTerminal.emit()">
+    <i class="pi pi-code"></i>
+    <span>Terminal</span>
+  </button>
   <a routerLink="/tasks" routerLinkActive="sidebar__item--active" class="sidebar__item">
     <i class="pi pi-list-check"></i>
     <span>Tasks</span>

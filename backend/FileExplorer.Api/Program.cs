@@ -80,7 +80,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             OnMessageReceived = context =>
             {
                 var accessToken = context.Request.Query["access_token"];
-                if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.Request.Path.StartsWithSegments("/hubs") || context.HttpContext.Request.Path.StartsWithSegments("/ws"))
                 {
                     context.Token = accessToken;
                 }
@@ -139,10 +139,46 @@ app.UseHttpsRedirection();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseCors("Default");
+app.UseWebSockets();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<TasksHub>("/hubs/tasks");
+// Interactive shell over a raw WebSocket, authenticated like the hub (JWT via ?access_token=).
+// It grants a root shell on the host, so it is restricted to the Admin role.
+app.Map("/ws/terminal", async (HttpContext context, IPathResolver resolver) =>
+{
+    if (!context.WebSockets.IsWebSocketRequest)
+    {
+        return Results.BadRequest();
+    }
+    if (!context.User.IsInRole("Admin"))
+    {
+        return Results.Forbid();
+    }
+
+    var virtualPath = context.Request.Query["path"].ToString();
+    string physical;
+    try
+    {
+        physical = resolver.ToPhysicalPath(string.IsNullOrEmpty(virtualPath) ? "/" : virtualPath);
+    }
+    catch (UnauthorizedAccessException)
+    {
+        return Results.BadRequest();
+    }
+    if (!Directory.Exists(physical))
+    {
+        physical = resolver.RootPath;
+    }
+    var hostDir = resolver.ToVirtualPath(physical);
+    int.TryParse(context.Request.Query["cols"], out var cols);
+    int.TryParse(context.Request.Query["rows"], out var rows);
+
+    using var socket = await context.WebSockets.AcceptWebSocketAsync();
+    await TerminalSession.RunAsync(socket, physical, hostDir, cols is > 1 and < 1000 ? cols : 80, rows is > 1 and < 1000 ? rows : 24, context.RequestAborted);
+    return Results.Empty;
+}).RequireAuthorization();
 // Any GET that doesn't match an API/hub route falls through to the Angular SPA, which
 // owns client-side routing from here.
 app.MapFallbackToFile("index.html");
