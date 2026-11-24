@@ -43,6 +43,27 @@ export class TerminalComponent implements AfterViewInit, OnDestroy {
       theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
     });
     this.term.loadAddon(this.fit);
+    // Ctrl+C copies when text is selected (otherwise it stays SIGINT); Ctrl+V pastes. The
+    // Ctrl+Shift+C/V variants always copy/paste. Returning false stops xterm sending the key to the
+    // shell; for paste the browser's native paste event then feeds xterm.
+    this.term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown' || !(e.ctrlKey || e.metaKey) || e.altKey) {
+        return true;
+      }
+      const key = e.key.toLowerCase();
+      if (key === 'c' && (e.shiftKey || this.term.hasSelection())) {
+        if (this.term.hasSelection()) {
+          void navigator.clipboard?.writeText(this.term.getSelection());
+        }
+        e.preventDefault();
+        return false;
+      }
+      if (key === 'v') {
+        // Let the native paste event run (preventing default here would block it).
+        return false;
+      }
+      return true;
+    });
     this.term.open(this.hostRef.nativeElement);
     this.fit.fit();
     this.connect();
