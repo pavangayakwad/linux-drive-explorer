@@ -16,7 +16,11 @@ namespace FileExplorer.Api.Services;
 /// </summary>
 public static class TerminalSession
 {
-    private const string ShellFallback = "exec bash -i 2>/dev/null || exec sh -i";
+    // Don't put `2>/dev/null` on an `exec`: it would stay in force for the whole shell and swallow the prompt
+    // (interactive shells print it to stderr). bash shows user@host:path$ through the distro's own rc files;
+    // the sh fallback gets an explicit path prompt.
+    private const string ShellFallback =
+        "if command -v bash >/dev/null 2>&1; then exec bash -i; else PS1='$(pwd) $ ' exec sh -i; fi";
 
     public static async Task RunAsync(WebSocket socket, string physicalDir, string hostDir, int cols, int rows, CancellationToken ct)
     {
