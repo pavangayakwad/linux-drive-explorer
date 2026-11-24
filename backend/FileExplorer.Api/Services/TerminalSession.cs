@@ -30,7 +30,9 @@ public static class TerminalSession
         var ttyFile = Path.Combine(Path.GetTempPath(), $"fx-tty-{Guid.NewGuid():N}");
         var useHost = FindOnPath("nsenter");
         var shellCmd = useHost
-            ? $"nsenter --target 1 --mount --uts --ipc --net --pid --wd={Quote(hostDir)} -- sh -c {Quote(ShellFallback)}"
+            // --wd= would be opened in the container's filesystem (before entering the host mount namespace),
+            // where the host path doesn't exist; so cd from inside the host namespaces instead.
+            ? $"nsenter --target 1 --mount --uts --ipc --net --pid -- sh -c {Quote($"cd {Quote(hostDir)} 2>/dev/null; {ShellFallback}")}"
             : $"cd {Quote(physicalDir)} && exec sh -c {Quote(ShellFallback)}";
         // Record the pty slave path (for later resizes) and set the initial size before the shell starts.
         var inner = $"tty > {Quote(ttyFile)}; stty cols {cols} rows {rows}; export TERM=xterm-256color; {shellCmd}";
