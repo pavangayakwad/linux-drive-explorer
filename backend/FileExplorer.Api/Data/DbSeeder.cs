@@ -11,6 +11,7 @@ public static class DbSeeder
     {
         if (await db.Users.AnyAsync())
         {
+            await SyncAdminAsync(db, options, logger);
             return;
         }
 
@@ -42,6 +43,49 @@ public static class DbSeeder
         else
         {
             logger.LogInformation("Seeded initial admin user '{Username}' from configured credentials.", options.Username);
+        }
+    }
+
+    /// <summary>
+    /// Keeps the initial admin account (the lowest-Id Admin user) in line with the configured
+    /// Admin:Username / Admin:Password on every startup. Blank values are ignored.
+    /// </summary>
+    private static async Task SyncAdminAsync(AppDbContext db, AdminSeedOptions options, ILogger logger)
+    {
+        var admin = await db.Users.Where(u => u.Role == "Admin").OrderBy(u => u.Id).FirstOrDefaultAsync();
+        if (admin is null)
+        {
+            return;
+        }
+
+        var changed = false;
+
+        if (!string.IsNullOrWhiteSpace(options.Username) && admin.Username != options.Username)
+        {
+            if (await db.Users.AnyAsync(u => u.Username == options.Username && u.Id != admin.Id))
+            {
+                logger.LogWarning("Configured admin username '{Username}' is already used by another user; not renaming.", options.Username);
+            }
+            else
+            {
+                logger.LogInformation("Admin username changed from '{Old}' to '{New}' per configuration.", admin.Username, options.Username);
+                admin.Username = options.Username;
+                changed = true;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Password) && !BCrypt.Net.BCrypt.Verify(options.Password, admin.PasswordHash))
+        {
+            admin.PasswordHash = BCrypt.Net.BCrypt.HashPassword(options.Password);
+            admin.RefreshToken = null;
+            admin.RefreshTokenExpiresAt = null;
+            logger.LogInformation("Admin password updated from configuration.");
+            changed = true;
+        }
+
+        if (changed)
+        {
+            await db.SaveChangesAsync();
         }
     }
 
