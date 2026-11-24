@@ -6,12 +6,14 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { MessageModule } from 'primeng/message';
 import { PasswordModule } from 'primeng/password';
+import { TooltipModule } from 'primeng/tooltip';
+import { AppConfigService } from '../../core/services/app-config.service';
 import { AuthService } from '../../core/services/auth.service';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [CommonModule, FormsModule, ButtonModule, InputTextModule, PasswordModule, MessageModule],
+  imports: [CommonModule, FormsModule, ButtonModule, InputTextModule, PasswordModule, MessageModule, TooltipModule],
   templateUrl: './login.component.html',
   styleUrl: './login.component.scss',
 })
@@ -23,6 +25,7 @@ export class LoginComponent {
 
   constructor(
     private readonly authService: AuthService,
+    readonly appConfig: AppConfigService,
     private readonly router: Router,
   ) {}
 

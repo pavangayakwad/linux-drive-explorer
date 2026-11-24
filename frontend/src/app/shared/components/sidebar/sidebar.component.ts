@@ -4,6 +4,7 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
 import { ConfirmationService, MenuItem } from 'primeng/api';
 import { MenuModule } from 'primeng/menu';
 import { TooltipModule } from 'primeng/tooltip';
+import { AppConfigService } from '../../../core/services/app-config.service';
 import { AuthService } from '../../../core/services/auth.service';
 import { ThemeService, THEME_COLORS, THEME_MODES, ThemeMode } from '../../../core/services/theme.service';
 import { ThemeColor } from '../../../core/models/auth.model';
@@ -81,6 +82,7 @@ export class SidebarComponent {
 
   constructor(
     readonly authService: AuthService,
+    readonly appConfig: AppConfigService,
     private readonly themeService: ThemeService,
     private readonly driveNavState: DriveNavigationStateService,
     private readonly confirmationService: ConfirmationService,

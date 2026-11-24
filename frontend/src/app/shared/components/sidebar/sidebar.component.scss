@@ -23,6 +23,23 @@
   border-radius: 6px;
 }
 
+.sidebar__brand-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.sidebar__brand-custom {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--p-text-muted-color, #6b7280);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar__brand-name {
   font-size: 0.95rem;
   font-weight: 700;

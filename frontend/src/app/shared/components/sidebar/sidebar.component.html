@@ -1,7 +1,12 @@
 <nav class="sidebar">
   <div class="sidebar__brand">
     <img src="app-icon.svg" alt="" class="sidebar__brand-icon" width="24" height="24" />
-    <span class="sidebar__brand-name">Drive Explorer</span>
+    <div class="sidebar__brand-text">
+      <span class="sidebar__brand-name">Drive Explorer</span>
+      @if (appConfig.appName()) {
+        <span class="sidebar__brand-custom" [pTooltip]="appConfig.appName()" tooltipPosition="right">{{ appConfig.appName() }}</span>
+      }
+    </div>
   </div>
 
   <div class="sidebar__top-row">

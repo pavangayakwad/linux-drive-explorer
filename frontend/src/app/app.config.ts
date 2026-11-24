@@ -1,4 +1,4 @@
-import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';
+import { ApplicationConfig, inject, provideAppInitializer, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { provideRouter } from '@angular/router';
 import Aura from '@primeuix/themes/aura';
@@ -7,6 +7,7 @@ import { providePrimeNG } from 'primeng/config';
 import { ConfirmationService, MessageService } from 'primeng/api';
 
 import { routes } from './app.routes';
+import { AppConfigService } from './core/services/app-config.service';
 import { THEME_HEX } from './core/services/theme.service';
 
 // Default theme color (green). Signed-in users can switch to blue/violet at
@@ -20,6 +21,7 @@ const AppPreset = definePreset(Aura, {
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
+    provideAppInitializer(() => inject(AppConfigService).load()),
     provideRouter(routes),
     provideAnimationsAsync(),
     providePrimeNG({

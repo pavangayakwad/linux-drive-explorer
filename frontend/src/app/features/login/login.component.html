@@ -2,7 +2,10 @@
   <form class="login-card" (ngSubmit)="submit()">
     <div class="login-card__header">
       <img src="app-icon.svg" alt="" class="login-card__icon" width="48" height="48" />
-      <h1>Drive Explorer</h1>
+      <h1 class="login-card__title">Drive Explorer</h1>
+      @if (appConfig.appName()) {
+        <div class="login-card__custom-name" [pTooltip]="appConfig.appName()" tooltipPosition="bottom">{{ appConfig.appName() }}</div>
+      }
       <p>Sign in to manage files on this server</p>
     </div>
 

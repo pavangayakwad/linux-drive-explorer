@@ -13,6 +13,8 @@ services:
     pid: host
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      # Optional custom name shown under "Drive Explorer" in the sidebar and login page.
+      App__Name: ${APP_NAME:-}
       Jwt__Key: ${JWT_KEY:?Set JWT_KEY in your .env file - see .env.example}
       Admin__Username: ${ADMIN_USERNAME:-admin}
       # Leave ADMIN_PASSWORD unset on first run to get a random password logged once at startup.
