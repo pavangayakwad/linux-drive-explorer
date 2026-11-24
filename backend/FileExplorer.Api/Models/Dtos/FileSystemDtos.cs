@@ -35,6 +35,8 @@ public record CreateEntryRequest(string ParentPath, string Name, bool IsDirector
 
 public record RenameRequest(string Path, string NewName);
 
+public record SaveTextRequest(string Path, string Content);
+
 public enum DirectorySizeStatus { Running, Completed, Cancelled, Failed }
 
 public record DirectorySizeJobDto(Guid JobId, string Path, DirectorySizeStatus Status, long Bytes);

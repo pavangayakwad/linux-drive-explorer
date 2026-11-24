@@ -36,3 +36,29 @@
   font-size: 0.9rem;
   margin: 0;
 }
+
+.preview__editor {
+  width: 100%;
+  min-height: 55vh;
+  box-sizing: border-box;
+  resize: vertical;
+  white-space: pre;
+  font-family: 'Cascadia Code', 'Courier New', monospace;
+  font-size: 0.9rem;
+  padding: 0.5rem;
+  border: 1px solid var(--p-surface-border, #d1d5db);
+  border-radius: 6px;
+  background: var(--p-surface-ground, #fff);
+  color: inherit;
+}
+
+.preview__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0;
+
+  &--top {
+    justify-content: flex-end;
+    margin: 0 0 0.5rem;
+  }
+}

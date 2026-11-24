@@ -165,6 +165,50 @@ public class FilesController(
         return File(System.IO.File.OpenRead(physical), contentType, enableRangeProcessing: true);
     }
 
+    /// <summary>Overwrites an existing text file with the edited content from the preview dialog. Only files the
+    /// preview itself would call text are accepted, and the file must already exist (this never creates one).
+    ///</summary>
+    [HttpPut("content")]
+    [RequestSizeLimit(16 * 1024 * 1024)]
+    public async Task<IActionResult> SaveContent(SaveTextRequest request, CancellationToken ct)
+    {
+        string physical;
+        try
+        {
+            physical = pathResolver.ToPhysicalPath(request.Path);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
+
+        if (!System.IO.File.Exists(physical))
+        {
+            return NotFound(new { message = $"'{request.Path}' was not found." });
+        }
+
+        var contentType = await ResolvePreviewContentTypeAsync(physical, ct);
+        if (contentType is null || !contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase))
+        {
+            return StatusCode(StatusCodes.Status415UnsupportedMediaType, new { message = "Only text files can be edited." });
+        }
+
+        try
+        {
+            // Written in place (not swapped via a temp file) so the owner, mode and inode of the file survive.
+            await System.IO.File.WriteAllTextAsync(physical, request.Content ?? string.Empty, new System.Text.UTF8Encoding(false), ct);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
+        catch (IOException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+    }
+
     [HttpGet("download")]
     public IActionResult Download([FromQuery] string path)
     {

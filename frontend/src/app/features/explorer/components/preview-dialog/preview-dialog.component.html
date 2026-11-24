@@ -28,10 +28,33 @@
         @if (truncated()) {
           <div class="preview__hint">
             Showing the beginning of this file — it is {{ formatBytes(totalBytes() ?? 0) }} in total.
-            Use Download from the row's right-click menu to read all of it.
+            Use Download from the row's right-click menu to read all of it. Editing is disabled for partial views.
           </div>
         }
-        <pre class="preview__text">{{ textContent() }}</pre>
+        @if (saveError()) {
+          <p-message severity="error" [text]="saveError()!" styleClass="preview__error" />
+        }
+        @if (editing()) {
+          <textarea
+            class="preview__editor"
+            spellcheck="false"
+            [value]="draft()"
+            (input)="onDraftInput($event)"
+            (keydown)="onTabKey($event)"
+            [disabled]="saving()"
+          ></textarea>
+          <div class="preview__actions">
+            <p-button label="Save" icon="pi pi-save" size="small" [loading]="saving()" (onClick)="save()" />
+            <p-button label="Cancel" severity="secondary" size="small" [disabled]="saving()" (onClick)="cancelEdit()" />
+          </div>
+        } @else {
+          @if (!truncated()) {
+            <div class="preview__actions preview__actions--top">
+              <p-button label="Edit" icon="pi pi-pencil" size="small" severity="secondary" (onClick)="startEdit()" />
+            </div>
+          }
+          <pre class="preview__text">{{ textContent() }}</pre>
+        }
       }
       @default {
         <div class="preview__status">

@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, signal } from '@angular/core';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
+import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { MessageModule } from 'primeng/message';
 import { apiClient } from '../../../../core/http/api-client';
@@ -39,7 +40,7 @@ function kindForExtension(extension: string): PreviewKind {
 @Component({
   selector: 'app-preview-dialog',
   standalone: true,
-  imports: [CommonModule, DialogModule, MessageModule],
+  imports: [CommonModule, ButtonModule, DialogModule, MessageModule],
   templateUrl: './preview-dialog.component.html',
   styleUrl: './preview-dialog.component.scss',
 })
@@ -59,7 +60,54 @@ export class PreviewDialogComponent implements OnChanges, OnDestroy {
 
   readonly formatBytes = formatBytes;
 
+  readonly editing = signal(false);
+  readonly saving = signal(false);
+  readonly draft = signal('');
+  readonly saveError = signal<string | null>(null);
+
   private rawObjectUrl: string | null = null;
+
+  startEdit(): void {
+    this.draft.set(this.textContent());
+    this.saveError.set(null);
+    this.editing.set(true);
+  }
+
+  cancelEdit(): void {
+    this.editing.set(false);
+    this.saveError.set(null);
+  }
+
+  onDraftInput(event: Event): void {
+    this.draft.set((event.target as HTMLTextAreaElement).value);
+  }
+
+  async save(): Promise<void> {
+    const entry = this.entry;
+    if (!entry || this.saving()) {
+      return;
+    }
+    this.saving.set(true);
+    this.saveError.set(null);
+    try {
+      await apiClient.put('/files/content', { path: entry.path, content: this.draft() });
+      this.textContent.set(this.draft());
+      this.editing.set(false);
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      this.saveError.set(message ?? 'Could not save the file.');
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  onTabKey(event: Event): void {
+    const e = event as KeyboardEvent;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      void this.save();
+    }
+  }
 
   constructor(private readonly sanitizer: DomSanitizer) {}
 
@@ -128,6 +176,10 @@ export class PreviewDialogComponent implements OnChanges, OnDestroy {
     this.totalBytes.set(null);
     this.errorMessage.set(null);
     this.kind.set('unsupported');
+    this.editing.set(false);
+    this.saving.set(false);
+    this.saveError.set(null);
+    this.draft.set('');
   }
 
   close(): void {
