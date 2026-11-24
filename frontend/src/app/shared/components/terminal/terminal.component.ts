@@ -53,7 +53,7 @@ export class TerminalComponent implements AfterViewInit, OnDestroy {
       const key = e.key.toLowerCase();
       if (key === 'c' && (e.shiftKey || this.term.hasSelection())) {
         if (this.term.hasSelection()) {
-          void navigator.clipboard?.writeText(this.term.getSelection());
+          this.copyText(this.term.getSelection());
         }
         e.preventDefault();
         return false;
@@ -76,6 +76,30 @@ export class TerminalComponent implements AfterViewInit, OnDestroy {
     this.observer = new ResizeObserver(() => this.scheduleFit());
     this.observer.observe(this.hostRef.nativeElement);
     this.term.focus();
+  }
+
+  /** navigator.clipboard only exists in secure contexts (HTTPS/localhost) and can reject, so fall
+   * back to a hidden textarea + execCommand('copy'), which works over plain HTTP. */
+  private copyText(text: string): void {
+    const fallback = (): void => {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+      } finally {
+        document.body.removeChild(ta);
+        this.term.focus();
+      }
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).catch(fallback);
+    } else {
+      fallback();
+    }
   }
 
   private connect(): void {
