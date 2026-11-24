@@ -6,6 +6,6 @@ public record RefreshRequest(string RefreshToken);
 
 public record AuthResponse(string AccessToken, DateTimeOffset AccessTokenExpiresAt, string RefreshToken, string Username, string Role, string ThemeColor);
 
-public record ChangePasswordRequest(string NewPassword);
+public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
 public record UpdateThemeRequest(string ThemeColor);

@@ -25,7 +25,7 @@ public static class DbSeeder
         var admin = new User
         {
             Username = options.Username,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
+            PasswordHash = Services.AuthService.HashPassword(password),
             Role = "Admin",
         };
 
@@ -76,9 +76,11 @@ public static class DbSeeder
 
         if (!string.IsNullOrWhiteSpace(options.Password) && !BCrypt.Net.BCrypt.Verify(options.Password, admin.PasswordHash))
         {
-            admin.PasswordHash = BCrypt.Net.BCrypt.HashPassword(options.Password);
+            admin.PasswordHash = Services.AuthService.HashPassword(options.Password);
             admin.RefreshToken = null;
             admin.RefreshTokenExpiresAt = null;
+            admin.FailedLoginCount = 0;
+            admin.LockoutUntil = null;
             logger.LogInformation("Admin password updated from configuration.");
             changed = true;
         }

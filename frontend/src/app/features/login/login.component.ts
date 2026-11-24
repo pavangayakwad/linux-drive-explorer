@@ -1,3 +1,4 @@
+import { isAxiosError } from 'axios';
 import { CommonModule } from '@angular/common';
 import { Component, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -41,8 +42,13 @@ export class LoginComponent {
     try {
       await this.authService.login({ username: this.username, password: this.password });
       await this.router.navigateByUrl('/');
-    } catch {
-      this.errorMessage.set('Invalid username or password.');
+    } catch (error) {
+      // 429 = account lockout or per-IP rate limit; surface the server's wait time instead of a misleading "wrong password".
+      if (isAxiosError(error) && error.response?.status === 429) {
+        this.errorMessage.set((error.response.data?.message as string | undefined) ?? 'Too many attempts. Please wait a minute and try again.');
+      } else {
+        this.errorMessage.set('Invalid username or password.');
+      }
     } finally {
       this.loading.set(false);
     }

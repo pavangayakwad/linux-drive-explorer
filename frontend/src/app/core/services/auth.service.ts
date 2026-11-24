@@ -82,8 +82,8 @@ export class AuthService {
   }
 
   /** Change the current user's password. The backend revokes the refresh token on success, so we sign out locally. */
-  async changePassword(newPassword: string): Promise<void> {
-    await apiClient.post('/auth/change-password', { newPassword });
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await apiClient.post('/auth/change-password', { currentPassword, newPassword });
     this.clearSession();
     await this.router.navigateByUrl('/login');
   }

@@ -3,6 +3,7 @@ using FileExplorer.Api.Models.Dtos;
 using FileExplorer.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace FileExplorer.Api.Controllers;
 
@@ -13,14 +14,26 @@ public class AuthController(IAuthService authService) : ControllerBase
     private static readonly HashSet<string> AllowedThemeColors = new(StringComparer.OrdinalIgnoreCase) { "green", "blue", "violet" };
 
     [AllowAnonymous]
+    [EnableRateLimiting("auth")]
     [HttpPost("login")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request, CancellationToken ct)
     {
-        var result = await authService.LoginAsync(request.Username, request.Password, ct);
-        return result is null ? Unauthorized(new { message = "Invalid username or password." }) : Ok(result);
+        var outcome = await authService.LoginAsync(request.Username, request.Password, ct);
+        if (outcome.Response is not null)
+        {
+            return Ok(outcome.Response);
+        }
+        if (outcome.RetryAfter is { } retryAfter)
+        {
+            var seconds = (int)Math.Ceiling(retryAfter.TotalSeconds);
+            Response.Headers.RetryAfter = seconds.ToString();
+            return StatusCode(StatusCodes.Status429TooManyRequests, new { message = $"Too many failed attempts. Try again in {seconds} seconds." });
+        }
+        return Unauthorized(new { message = "Invalid username or password." });
     }
 
     [AllowAnonymous]
+    [EnableRateLimiting("auth")]
     [HttpPost("refresh")]
     public async Task<ActionResult<AuthResponse>> Refresh(RefreshRequest request, CancellationToken ct)
     {
@@ -37,12 +50,17 @@ public class AuthController(IAuthService authService) : ControllerBase
     }
 
     [Authorize]
+    [EnableRateLimiting("auth")]
     [HttpPost("change-password")]
     public async Task<IActionResult> ChangePassword(ChangePasswordRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
         {
             return BadRequest(new { message = "New password must be at least 8 characters long." });
+        }
+        if (request.NewPassword.Length > 256)
+        {
+            return BadRequest(new { message = "New password is too long." });
         }
 
         var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -51,8 +69,13 @@ public class AuthController(IAuthService authService) : ControllerBase
             return Unauthorized();
         }
 
-        var success = await authService.ChangePasswordAsync(userId, request.NewPassword, ct);
-        return success ? NoContent() : Unauthorized();
+        var result = await authService.ChangePasswordAsync(userId, request.CurrentPassword, request.NewPassword, ct);
+        return result switch
+        {
+            ChangePasswordResult.Success => NoContent(),
+            ChangePasswordResult.WrongCurrentPassword => BadRequest(new { message = "Current password is incorrect." }),
+            _ => Unauthorized(),
+        };
     }
 
     [Authorize]

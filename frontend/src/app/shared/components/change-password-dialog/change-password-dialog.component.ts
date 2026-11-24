@@ -19,6 +19,7 @@ export class ChangePasswordDialogComponent {
   @Input() visible = false;
   @Output() readonly visibleChange = new EventEmitter<boolean>();
 
+  currentPassword = '';
   newPassword = '';
   confirmPassword = '';
 
@@ -33,6 +34,7 @@ export class ChangePasswordDialogComponent {
   }
 
   private reset(): void {
+    this.currentPassword = '';
     this.newPassword = '';
     this.confirmPassword = '';
     this.errorMessage.set(null);
@@ -42,6 +44,10 @@ export class ChangePasswordDialogComponent {
   async submit(): Promise<void> {
     this.errorMessage.set(null);
 
+    if (!this.currentPassword) {
+      this.errorMessage.set('Enter your current password.');
+      return;
+    }
     if (this.newPassword.length < 8) {
       this.errorMessage.set('New password must be at least 8 characters long.');
       return;
@@ -53,7 +59,7 @@ export class ChangePasswordDialogComponent {
 
     this.saving.set(true);
     try {
-      await this.authService.changePassword(this.newPassword);
+      await this.authService.changePassword(this.currentPassword, this.newPassword);
       // authService.changePassword() already signs the user out and redirects to /login on success.
     } catch (error) {
       const message = isAxiosError(error) && error.response?.data?.message

@@ -18,7 +18,13 @@ services:
       Jwt__Key: ${JWT_KEY:?Set JWT_KEY in your .env file - see .env.example}
       Admin__Username: ${ADMIN_USERNAME:-admin}
       # Leave ADMIN_PASSWORD unset on first run to get a random password logged once at startup.
-      Admin__Password: ${ADMIN_PASSWORD:-admin}
+      # If set, it must be 12+ characters and not a common password, or the API refuses to start.
+      Admin__Password: ${ADMIN_PASSWORD:-}
+      # The in-browser terminal is a ROOT shell on the host (see README). Off unless you opt in.
+      Terminal__Enabled: ${TERMINAL_ENABLED:-false}
+      # Set to true ONLY when running behind a reverse proxy you control that sets X-Forwarded-For,
+      # so login rate limiting sees real client IPs. Never enable when exposed directly.
+      Security__TrustForwardedHeaders: ${TRUST_FORWARDED_HEADERS:-false}
     ports:
       - "7766:8080"
     volumes:

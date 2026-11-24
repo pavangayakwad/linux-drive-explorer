@@ -4,7 +4,9 @@ using FileExplorer.Api.Hubs;
 using FileExplorer.Api.Options;
 using FileExplorer.Api.Services;
 using FileExplorer.Api.Services.Jobs;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
@@ -58,6 +60,54 @@ if (string.IsNullOrWhiteSpace(jwtKey))
         "Jwt:Key is not configured. Set the JWT_KEY environment variable (or Jwt__Key) to a random string of 32+ characters before starting the API.");
 }
 
+// HS256 with a short key is brute-forceable offline, so refuse to start with one.
+if (Encoding.UTF8.GetByteCount(jwtKey) < 32)
+{
+    throw new InvalidOperationException("Jwt:Key must be at least 32 bytes long. Generate one with: openssl rand -base64 48");
+}
+
+// The admin password may be blank (a strong one is generated), but if one is supplied in production it must
+// not be a trivially guessable value - this is the first thing a scripted attacker tries.
+var configuredAdminPassword = builder.Configuration[$"{AdminSeedOptions.SectionName}:Password"];
+if (!builder.Environment.IsDevelopment() && !string.IsNullOrWhiteSpace(configuredAdminPassword))
+{
+    string[] commonPasswords = ["admin", "password", "changeme", "changeme123!", "admin123", "12345678", "123456789", "qwerty123"];
+    if (configuredAdminPassword.Length < 12 || commonPasswords.Contains(configuredAdminPassword, StringComparer.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException(
+            "ADMIN_PASSWORD is too weak. Use at least 12 characters and avoid common passwords, or leave it blank to have a random one generated.");
+    }
+}
+
+// Throttle credential endpoints per client IP. Account lockout (AuthService) stops guessing against one
+// account; this stops one source from spraying many accounts / burning CPU on BCrypt.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("auth", httpContext => RateLimitPartition.GetSlidingWindowLimiter(
+        httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new SlidingWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            SegmentsPerWindow = 6,
+            QueueLimit = 0,
+        }));
+});
+
+// Behind a reverse proxy the real client IP arrives in X-Forwarded-For; without this every request
+// would appear to come from the proxy and share one rate-limit bucket. Only trusted when explicitly
+// enabled, since otherwise a client could spoof the header to dodge the limiter.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    if (builder.Configuration.GetValue<bool>("Security:TrustForwardedHeaders"))
+    {
+        options.KnownIPNetworks.Clear();
+        options.KnownProxies.Clear();
+    }
+});
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -80,7 +130,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             OnMessageReceived = context =>
             {
                 var accessToken = context.Request.Query["access_token"];
-                if (!string.IsNullOrEmpty(accessToken) && (context.HttpContext.Request.Path.StartsWithSegments("/hubs") || context.HttpContext.Request.Path.StartsWithSegments("/ws")))
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && (path.StartsWithSegments("/hubs") || path.StartsWithSegments("/ws")))
                 {
                     context.Token = accessToken;
                 }
@@ -135,11 +186,36 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+if (builder.Configuration.GetValue<bool>("Security:TrustForwardedHeaders"))
+{
+    app.UseForwardedHeaders();
+}
+
+app.Use(async (context, next) =>
+{
+    var headers = context.Response.Headers;
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["X-Frame-Options"] = "DENY";
+    headers["Referrer-Policy"] = "no-referrer";
+    headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+    // The SPA is same-origin; PrimeNG/Angular inject inline styles, hence style-src 'unsafe-inline'.
+    headers["Content-Security-Policy"] =
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
+        "font-src 'self' data:; connect-src 'self' ws: wss:; media-src 'self' blob:; object-src 'none'; " +
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+    await next();
+});
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
 app.UseHttpsRedirection();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseCors("Default");
 app.UseWebSockets();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
@@ -148,6 +224,11 @@ app.MapHub<TasksHub>("/hubs/tasks");
 // It grants a root shell on the host, so it is restricted to the Admin role.
 app.Map("/ws/terminal", async (HttpContext context, IPathResolver resolver) =>
 {
+    // The terminal is a root shell on the host, so it is off unless explicitly enabled.
+    if (!app.Configuration.GetValue<bool>("Terminal:Enabled"))
+    {
+        return Results.NotFound();
+    }
     if (!context.WebSockets.IsWebSocketRequest)
     {
         return Results.BadRequest();
@@ -175,6 +256,8 @@ app.Map("/ws/terminal", async (HttpContext context, IPathResolver resolver) =>
     int.TryParse(context.Request.Query["cols"], out var cols);
     int.TryParse(context.Request.Query["rows"], out var rows);
 
+    app.Logger.LogWarning("Terminal session opened by '{User}' from {Ip} at '{Path}'.",
+        context.User.Identity?.Name, context.Connection.RemoteIpAddress, hostDir);
     using var socket = await context.WebSockets.AcceptWebSocketAsync();
     await TerminalSession.RunAsync(socket, physical, hostDir, cols is > 1 and < 1000 ? cols : 80, rows is > 1 and < 1000 ? rows : 24, context.RequestAborted);
     return Results.Empty;
