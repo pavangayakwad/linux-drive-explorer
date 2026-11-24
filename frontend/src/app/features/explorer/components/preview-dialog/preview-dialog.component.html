@@ -1,11 +1,23 @@
 <p-dialog
-  [header]="entry?.name ?? 'Preview'"
   [(visible)]="visible"
   [modal]="true"
   [style]="{ width: '80vw' }"
-  [contentStyle]="{ 'max-height': '75vh', overflow: 'auto' }"
+  [contentStyle]="{ 'max-height': '82vh', padding: '0 1rem 0.75rem', overflow: 'auto' }"
   (visibleChange)="visibleChange.emit($event)"
 >
+  <ng-template #header>
+    <div class="preview__header">
+      <span class="preview__title">{{ entry?.name ?? 'Preview' }}</span>
+      @if (kind() === 'text' && !loading() && !errorMessage()) {
+        @if (editing()) {
+          <p-button label="Save" icon="pi pi-save" size="small" [loading]="saving()" (onClick)="save()" />
+          <p-button label="Cancel" severity="secondary" size="small" [disabled]="saving()" (onClick)="cancelEdit()" />
+        } @else if (!truncated()) {
+          <p-button label="Edit" icon="pi pi-pencil" size="small" severity="secondary" (onClick)="startEdit()" />
+        }
+      }
+    </div>
+  </ng-template>
   @if (loading()) {
     <div class="preview__status">Loading preview...</div>
   } @else if (errorMessage()) {
@@ -43,16 +55,7 @@
             (keydown)="onTabKey($event)"
             [disabled]="saving()"
           ></textarea>
-          <div class="preview__actions">
-            <p-button label="Save" icon="pi pi-save" size="small" [loading]="saving()" (onClick)="save()" />
-            <p-button label="Cancel" severity="secondary" size="small" [disabled]="saving()" (onClick)="cancelEdit()" />
-          </div>
         } @else {
-          @if (!truncated()) {
-            <div class="preview__actions preview__actions--top">
-              <p-button label="Edit" icon="pi pi-pencil" size="small" severity="secondary" (onClick)="startEdit()" />
-            </div>
-          }
           <pre class="preview__text">{{ textContent() }}</pre>
         }
       }

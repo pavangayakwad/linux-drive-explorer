@@ -39,7 +39,7 @@
 
 .preview__editor {
   width: 100%;
-  min-height: 55vh;
+  height: 68vh;
   box-sizing: border-box;
   resize: vertical;
   white-space: pre;
@@ -52,13 +52,20 @@
   color: inherit;
 }
 
-.preview__actions {
+.preview__header {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
-  margin: 0.75rem 0 0;
+  flex: 1;
+  min-width: 0;
+}
 
-  &--top {
-    justify-content: flex-end;
-    margin: 0 0 0.5rem;
-  }
+.preview__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 1.1rem;
 }
