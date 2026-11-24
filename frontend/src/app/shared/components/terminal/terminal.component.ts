@@ -3,6 +3,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { tokenStore } from '../../../core/http/token-store';
 
+const EARLY_CLOSE_MS = 3000;
+
 /** Interactive shell backed by the API's /ws/terminal WebSocket. The working directory is fixed at
  * creation time (`path`) - later navigation in the explorer deliberately does not affect it. */
 @Component({
@@ -70,11 +72,22 @@ export class TerminalComponent implements AfterViewInit, OnDestroy {
     socket.onmessage = (event) => {
       this.term.write(typeof event.data === 'string' ? event.data : new Uint8Array(event.data as ArrayBuffer));
     };
+    const openedAt = Date.now();
     // The server closes the socket when the shell exits (`exit` / Ctrl+D), so dismiss the panel.
-    socket.onclose = () => {
-      if (!this.disposed) {
-        this.closed.emit();
+    // But if it closes almost immediately the session failed to start (auth/role rejection, no
+    // `script`, non-Linux host...) - keep the panel open so the error is readable instead of
+    // flashing away.
+    socket.onclose = (event) => {
+      if (this.disposed) {
+        return;
       }
+      if (Date.now() - openedAt < EARLY_CLOSE_MS) {
+        const reason = event.reason ? ` (${event.reason})` : '';
+        this.term.write(`\r\n\x1b[31m[Terminal session ended immediately${reason}. Code ${event.code}. ` +
+          'Check that you are an Admin and that the API runs on Linux with `script` installed.]\x1b[0m\r\n');
+        return;
+      }
+      this.closed.emit();
     };
   }
 

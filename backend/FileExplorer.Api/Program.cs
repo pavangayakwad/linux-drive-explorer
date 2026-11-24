@@ -80,7 +80,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             OnMessageReceived = context =>
             {
                 var accessToken = context.Request.Query["access_token"];
-                if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.Request.Path.StartsWithSegments("/hubs") || context.HttpContext.Request.Path.StartsWithSegments("/ws"))
+                if (!string.IsNullOrEmpty(accessToken) && (context.HttpContext.Request.Path.StartsWithSegments("/hubs") || context.HttpContext.Request.Path.StartsWithSegments("/ws")))
                 {
                     context.Token = accessToken;
                 }
