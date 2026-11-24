@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import * as signalR from '@microsoft/signalr';
@@ -11,6 +11,7 @@ import { DriveSummary, UnmountedDevice } from '../../core/models/file-system.mod
 import { Job } from '../../core/models/job.model';
 import { tokenStore } from '../../core/http/token-store';
 import { TasksService } from '../../core/services/tasks.service';
+import { TerminalRequestService } from '../../core/services/terminal-request.service';
 import { SidebarComponent } from '../../shared/components/sidebar/sidebar.component';
 import { TerminalComponent } from '../../shared/components/terminal/terminal.component';
 import { UploadProgressPanelComponent } from '../../shared/components/upload-progress-panel/upload-progress-panel.component';
@@ -250,6 +251,32 @@ export class ShellComponent implements OnInit, OnDestroy {
     }
     this.runningTaskCount.set(count);
   }
+
+  /** Opens (or re-opens, if already showing another directory) the terminal at the requested path. */
+  private readonly terminalRequests = inject(TerminalRequestService);
+  private lastTerminalRequestId = 0;
+  private readonly terminalRequestEffect = effect(() => {
+    const req = this.terminalRequests.request();
+    if (!req || req.id === this.lastTerminalRequestId) {
+      return;
+    }
+    this.lastTerminalRequestId = req.id;
+    untracked(() => {
+      const open = () => {
+        const mainHeight = document.querySelector('.shell__main')?.clientHeight ?? window.innerHeight;
+        if (this.terminalHeight() === 0) {
+          this.terminalHeight.set(Math.round(mainHeight / 2));
+        }
+        this.terminalPath.set(req.path || '/');
+      };
+      if (this.terminalPath() !== null) {
+        this.terminalPath.set(null);
+        setTimeout(open);
+      } else {
+        open();
+      }
+    });
+  });
 
   toggleTerminal(): void {
     if (this.terminalPath() !== null) {

@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
+import { TerminalRequestService } from '../../core/services/terminal-request.service';
 import { Subscription } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { ConfirmationService, MenuItem, MessageService } from 'primeng/api';
@@ -228,6 +229,7 @@ export class ExplorerComponent implements OnInit, OnDestroy {
     private readonly router: Router,
     private readonly elementRef: ElementRef<HTMLElement>,
     private readonly changeDetectorRef: ChangeDetectorRef,
+    private readonly terminalRequests: TerminalRequestService,
   ) {
     this.sizeTracker = this.createSizeTracker();
 
@@ -752,9 +754,15 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       { separator: true },
       { label: 'Properties', icon: 'pi pi-info-circle', command: () => this.openProperties() },
       { separator: true },
+      { label: 'Terminal', icon: 'pi pi-code', command: () => this.openTerminalHere() },
       { label: 'Refresh', icon: 'pi pi-refresh', command: () => this.refresh() },
     );
     return items;
+  }
+
+  /** Opens the shell's terminal panel in the folder currently being browsed. */
+  openTerminalHere(): void {
+    this.terminalRequests.open(this.listing()?.path ?? '/');
   }
 
   private buildEmptyMenu(): MenuItem[] {
@@ -767,6 +775,7 @@ export class ExplorerComponent implements OnInit, OnDestroy {
       { label: 'Upload files', icon: 'pi pi-upload', command: () => this.openUploadFilesPicker() },
       { label: 'Upload folder', icon: 'pi pi-cloud-upload', command: () => this.openUploadFolderPicker() },
       { separator: true },
+      { label: 'Terminal', icon: 'pi pi-code', command: () => this.openTerminalHere() },
       { label: 'Refresh', icon: 'pi pi-refresh', command: () => this.refresh() },
     ];
   }
